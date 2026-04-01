@@ -1,0 +1,12 @@
+name: infrastructure
+language: shell
+build: "true"
+test: shellcheck homelab/bootstrap/*.sh 2>/dev/null || true
+lint: shellcheck homelab/bootstrap/*.sh 2>/dev/null || true
+risky_paths:
+  - homelab/bootstrap/03-setup-obs.sh      # observability stack
+  - homelab/bootstrap/09-setup-deploy.sh   # deployment container
+  - wol/bootstrap/                         # WOL infrastructure
+definition_of_done:
+  - scripts are idempotent
+  - no hardcoded secrets

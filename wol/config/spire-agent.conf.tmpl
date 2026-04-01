@@ -1,0 +1,58 @@
+agent {
+    data_dir     = "/var/lib/spire/agent"
+    log_level    = "INFO"
+    log_file     = "/var/log/spire/agent.log"
+
+    server_address = "10.0.0.204"
+    server_port    = "8081"
+
+    # Unix domain socket -- accessed by workloads via the spire group
+    socket_path = "/var/run/spire/agent.sock"
+
+    trust_domain       = "wol"
+    trust_bundle_path  = "/etc/spire/agent/root_ca.crt"
+    insecure_bootstrap = false
+
+    # Agent SVID lifetime: 24 hours (long enough to survive SPIRE Server downtime during reboots)
+    # This is set server-side per registration entry; documented here for reference.
+}
+
+plugins {
+    # -------------------------------------------------------------------------
+    # Node Attestor -- join_token (transitional)
+    # Generated per-host by: spire-server token generate -spiffeID spiffe://wol/node/HOSTNAME
+    # Token is single-use with 5-minute TTL; subsequent reboots use cached state.
+    # -------------------------------------------------------------------------
+    NodeAttestor "join_token" {
+        plugin_data {}
+    }
+
+    # NodeAttestor "tpm_devid" {
+    #     plugin_data {
+    #         devid_cert_path    = "/var/lib/spire/agent/devid.crt"
+    #         devid_priv_key_path = "/var/lib/spire/agent/devid.key"
+    #     }
+    # }
+
+    # -------------------------------------------------------------------------
+    # Workload Attestor -- unix
+    # Inspects calling process: unix:uid, unix:path (via /proc/<pid>/exe)
+    # Requires privileged LXC so /proc/<pid>/exe resolves correctly.
+    # -------------------------------------------------------------------------
+    WorkloadAttestor "unix" {
+        plugin_data {}
+    }
+
+    # Keys stored in memory; re-fetched from SPIRE Server on restart
+    KeyManager "memory" {
+        plugin_data {}
+    }
+}
+
+health_checks {
+    listener_enabled = true
+    bind_address     = "0.0.0.0"
+    bind_port        = "8082"
+    live_path        = "/live"
+    ready_path       = "/ready"
+}
