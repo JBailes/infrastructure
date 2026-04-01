@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# 11-setup-ollama.sh -- Create an LXC with Ollama and AMD GPU passthrough
+# 11-setup-llm.sh -- Create an LXC with llama.cpp (Vulkan) and AMD GPU passthrough
+#
+# Migrated from Ollama to llama.cpp with Vulkan backend for ~47% higher decode
+# throughput on AMD GPUs (40 tok/s vs 28 tok/s on 7900XTX with 27B Q4_K_M).
+# See docs/proposals/done/llama-server-migration.md for benchmark details.
 #
 # Runs on: the Proxmox host (creates an LXC, then pushes and configures)
 # Prereq: AMD GPU drivers (amdgpu) must be loaded on the Proxmox host
@@ -10,13 +14,16 @@
 #   ./11-setup-ollama.sh --deploy-only     # Re-deploy config to existing CT
 #
 # Options:
-#   --ctid <id>        Container ID (default: 121)
+#   --ctid <id>        Container ID (default: 103)
 #   --cpu <cores>      CPU cores (default: 8)
 #   --ram <mb>         RAM in MB (default: 65536)
 #   --disk <gb>        Disk in GB (default: 256)
 #   --storage <name>   Proxmox storage name (default: large)
-#   --model <tag>      Ollama model to pull after setup (default: qwen3.5:27b)
-#   --no-model         Skip model pull
+#   --model <url>      HuggingFace GGUF URL to download
+#   --model-path <p>   Path to existing GGUF file inside the container
+#   --no-model         Skip model download
+#   --ctx-size <n>     Context window size (default: 8192)
+#   --parallel <n>     Number of parallel request slots (default: 2)
 
 set -euo pipefail
 
@@ -28,7 +35,10 @@ CT_CPU=8
 CT_RAM=65536
 CT_DISK=256
 CT_STORAGE="large"
-CT_MODEL="qwen3.5:27b"
+CT_MODEL_URL="https://huggingface.co/unsloth/Qwen3.5-27B-GGUF/resolve/main/Qwen3.5-27B-Q4_K_M.gguf"
+CT_MODEL_PATH="/opt/models/qwen35-27b-q4km.gguf"
+CT_CTX_SIZE=8192
+CT_PARALLEL=2
 DEPLOY_ONLY=false
 
 # =========================================================================
@@ -39,65 +49,118 @@ configure() {
     err()  { echo "ERROR: $*" >&2; exit 1; }
     info() { echo "==> $*"; }
 
-    info "Configuring Ollama"
+    info "Configuring llama.cpp server (Vulkan backend)"
 
     # -------------------------------------------------------------------
-    # Install Ollama
+    # Install build dependencies
     # -------------------------------------------------------------------
-    if ! command -v ollama &>/dev/null; then
-        info "Installing Ollama"
-        apt-get update -qq
-        apt-get install -y --no-install-recommends curl ca-certificates zstd
-        curl -fsSL https://ollama.com/install.sh | sh
+    info "Installing build dependencies"
+    apt-get update -qq
+    apt-get install -y --no-install-recommends \
+        cmake build-essential git pkg-config \
+        libvulkan-dev glslc mesa-vulkan-drivers vulkan-tools \
+        wget ca-certificates
 
-        info "Installing ROCm libraries for AMD GPU support"
-        curl -fsSL https://ollama.com/download/ollama-linux-amd64-rocm.tar.zst \
-            | tar x --zstd -C /usr
-        info "Ollama installed"
+    # -------------------------------------------------------------------
+    # Build llama.cpp with Vulkan
+    # -------------------------------------------------------------------
+    local llama_dir="/opt/llama.cpp"
+    if [[ ! -d "$llama_dir" ]]; then
+        info "Cloning llama.cpp"
+        git clone --depth 1 https://github.com/ggml-org/llama.cpp.git "$llama_dir"
     else
-        info "Ollama already installed"
+        info "Updating llama.cpp"
+        git -C "$llama_dir" pull --ff-only 2>/dev/null || true
+    fi
+
+    info "Building llama.cpp with Vulkan backend"
+    cmake -B "$llama_dir/build" -S "$llama_dir" \
+        -DGGML_VULKAN=ON -DCMAKE_BUILD_TYPE=Release
+    cmake --build "$llama_dir/build" --config Release -j"$(nproc)"
+
+    info "llama.cpp built successfully"
+
+    # -------------------------------------------------------------------
+    # Download model (if URL provided and file doesn't exist)
+    # -------------------------------------------------------------------
+    if [[ -n "${CT_MODEL_URL:-}" && ! -f "$CT_MODEL_PATH" ]]; then
+        info "Downloading model to $CT_MODEL_PATH"
+        mkdir -p "$(dirname "$CT_MODEL_PATH")"
+        wget --progress=dot:giga "$CT_MODEL_URL" -O "$CT_MODEL_PATH"
+        info "Model downloaded"
+    elif [[ -f "$CT_MODEL_PATH" ]]; then
+        info "Model already exists at $CT_MODEL_PATH"
     fi
 
     # -------------------------------------------------------------------
-    # Configure Ollama systemd service
+    # Disable Ollama if present (migration from previous setup)
     # -------------------------------------------------------------------
-    info "Configuring Ollama service"
-    mkdir -p /etc/systemd/system/ollama.service.d
-    cat > /etc/systemd/system/ollama.service.d/override.conf <<'EOF'
+    if systemctl is-enabled ollama &>/dev/null; then
+        info "Disabling Ollama (replaced by llama-server)"
+        systemctl stop ollama 2>/dev/null || true
+        systemctl disable ollama 2>/dev/null || true
+    fi
+
+    # -------------------------------------------------------------------
+    # Configure llama-server systemd service
+    # -------------------------------------------------------------------
+    info "Configuring llama-server service"
+    cat > /etc/systemd/system/llama-server.service <<EOF
+[Unit]
+Description=llama.cpp Server (Vulkan)
+After=network.target
+
 [Service]
-Environment="OLLAMA_HOST=0.0.0.0:11434"
-Environment="HSA_OVERRIDE_GFX_VERSION=11.0.0"
+Type=simple
+ExecStart=${llama_dir}/build/bin/llama-server \\
+    --model ${CT_MODEL_PATH} \\
+    --gpu-layers 99 \\
+    --ctx-size ${CT_CTX_SIZE} \\
+    --host 0.0.0.0 \\
+    --port 8080 \\
+    --alias qwen3.5-27b \\
+    --parallel ${CT_PARALLEL} \\
+    --flash-attn on
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
     systemctl daemon-reload
-    systemctl enable ollama
-    systemctl restart ollama
+    systemctl enable llama-server
+    systemctl restart llama-server
 
-    # Wait for Ollama to be ready
-    info "Waiting for Ollama to start..."
+    # Wait for server to be ready
+    info "Waiting for llama-server to start..."
     local attempts=0
-    while ! curl -sf http://localhost:11434/api/version &>/dev/null; do
+    while ! curl -sf http://localhost:8080/v1/models &>/dev/null; do
         attempts=$((attempts + 1))
-        if [[ $attempts -ge 30 ]]; then
-            err "Ollama did not start within 30 seconds"
+        if [[ $attempts -ge 60 ]]; then
+            err "llama-server did not start within 60 seconds"
         fi
         sleep 1
     done
 
     # -------------------------------------------------------------------
-    # Firewall: restrict Ollama to LAN only
+    # Firewall: restrict to LAN only
     # -------------------------------------------------------------------
     info "Configuring firewall"
     apt-get install -y --no-install-recommends iptables
 
-    # Flush any previous ollama rules to be idempotent
+    # Flush any previous rules to be idempotent
+    iptables -D INPUT -p tcp --dport 8080 -s 127.0.0.1 -j ACCEPT 2>/dev/null || true
+    iptables -D INPUT -p tcp --dport 8080 -s 192.168.0.0/23 -j ACCEPT 2>/dev/null || true
+    iptables -D INPUT -p tcp --dport 8080 -j DROP 2>/dev/null || true
+    # Clean up old Ollama rules
     iptables -D INPUT -p tcp --dport 11434 -s 127.0.0.1 -j ACCEPT 2>/dev/null || true
     iptables -D INPUT -p tcp --dport 11434 -s 192.168.0.0/23 -j ACCEPT 2>/dev/null || true
     iptables -D INPUT -p tcp --dport 11434 -j DROP 2>/dev/null || true
 
-    iptables -A INPUT -p tcp --dport 11434 -s 127.0.0.1 -j ACCEPT
-    iptables -A INPUT -p tcp --dport 11434 -s 192.168.0.0/23 -j ACCEPT
-    iptables -A INPUT -p tcp --dport 11434 -j DROP
+    iptables -A INPUT -p tcp --dport 8080 -s 127.0.0.1 -j ACCEPT
+    iptables -A INPUT -p tcp --dport 8080 -s 192.168.0.0/23 -j ACCEPT
+    iptables -A INPUT -p tcp --dport 8080 -j DROP
 
     # Persist rules across reboots
     mkdir -p /etc/iptables /etc/network/if-pre-up.d
@@ -123,27 +186,39 @@ IPTABLES
         echo "WARN: No DRI render nodes found" >&2
     fi
 
+    # Verify Vulkan sees the GPU
+    if command -v vulkaninfo &>/dev/null; then
+        local gpu_name
+        gpu_name=$(vulkaninfo --summary 2>&1 | grep "deviceName" | head -1 | sed 's/.*= //')
+        info "Vulkan GPU: ${gpu_name:-unknown}"
+    fi
+
     # -------------------------------------------------------------------
     # Summary
     # -------------------------------------------------------------------
     local ip
     ip=$(hostname -I 2>/dev/null | awk '{print $1}') || ip="<CONTAINER_IP>"
-    local version
-    version=$(curl -sf http://localhost:11434/api/version | grep -o '"version":"[^"]*"' | cut -d'"' -f4) || version="unknown"
+    local model_id
+    model_id=$(curl -sf http://localhost:8080/v1/models | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4) || model_id="unknown"
 
-    cat <<EOF
+    cat <<SUMMARY
 
 ================================================================
-Ollama is deployed.
+llama-server is deployed.
 
-  API:       http://${ip}:11434
-  Version:   ${version}
+  API:       http://${ip}:8080/v1
+  Model:     ${model_id}
+  Backend:   Vulkan (Mesa RADV)
   GPU:       AMD 7900XTX (amdgpu) via /dev/kfd + /dev/dri
+  Context:   ${CT_CTX_SIZE} tokens
+  Parallel:  ${CT_PARALLEL} slots
 
-  Pull a model:  ollama pull qwen3:8b
-  Test:          curl http://${ip}:11434/api/version
+  Test:      curl http://${ip}:8080/v1/models
+  Chat:      curl http://${ip}:8080/v1/chat/completions \\
+               -H 'Content-Type: application/json' \\
+               -d '{"model":"${model_id}","messages":[{"role":"user","content":"Hello"}]}'
 ================================================================
-EOF
+SUMMARY
 }
 
 # =========================================================================
@@ -165,20 +240,25 @@ host_main() {
             --ram)          CT_RAM="${2:?--ram requires a value}"; shift 2 ;;
             --disk)         CT_DISK="${2:?--disk requires a value}"; shift 2 ;;
             --storage)      CT_STORAGE="${2:?--storage requires a value}"; shift 2 ;;
-            --model)        CT_MODEL="${2:?--model requires a value}"; shift 2 ;;
-            --no-model)     CT_MODEL=""; shift ;;
+            --model)        CT_MODEL_URL="${2:?--model requires a value}"; shift 2 ;;
+            --model-path)   CT_MODEL_PATH="${2:?--model-path requires a value}"; shift 2 ;;
+            --no-model)     CT_MODEL_URL=""; shift ;;
+            --ctx-size)     CT_CTX_SIZE="${2:?--ctx-size requires a value}"; shift 2 ;;
+            --parallel)     CT_PARALLEL="${2:?--parallel requires a value}"; shift 2 ;;
             --deploy-only)  DEPLOY_ONLY=true; shift ;;
             *)              err "Unknown option: $1" ;;
         esac
     done
 
-    info "Ollama LXC Setup"
-    echo "  CTID:    ${CTID}"
-    echo "  CPU:     ${CT_CPU} cores"
-    echo "  RAM:     ${CT_RAM} MB ($((CT_RAM / 1024)) GB)"
-    echo "  Disk:    ${CT_DISK} GB"
-    echo "  Storage: ${CT_STORAGE}"
-    echo "  Model:   ${CT_MODEL:-none}"
+    info "llama.cpp LXC Setup"
+    echo "  CTID:     ${CTID}"
+    echo "  CPU:      ${CT_CPU} cores"
+    echo "  RAM:      ${CT_RAM} MB ($((CT_RAM / 1024)) GB)"
+    echo "  Disk:     ${CT_DISK} GB"
+    echo "  Storage:  ${CT_STORAGE}"
+    echo "  Model:    ${CT_MODEL_URL:-none (use --model-path)}"
+    echo "  Context:  ${CT_CTX_SIZE}"
+    echo "  Parallel: ${CT_PARALLEL}"
     echo ""
 
     # -----------------------------------------------------------------
@@ -212,7 +292,7 @@ host_main() {
 
     if [[ "$DEPLOY_ONLY" == "true" ]]; then
         info "Deploy-only mode: skipping container creation"
-    elif create_lxc "$CTID" "ollama" "$ip" "$CT_RAM" "$CT_CPU" "$CT_DISK" "$ROUTER_GW" "yes"; then
+    elif create_lxc "$CTID" "llm" "$ip" "$CT_RAM" "$CT_CPU" "$CT_DISK" "$ROUTER_GW" "yes"; then
         # New container created -- configure GPU passthrough before first start
         configure_gpu_passthrough "$CTID"
         pct start "$CTID"
@@ -231,19 +311,10 @@ host_main() {
     # -----------------------------------------------------------------
     # Deploy configuration
     # -----------------------------------------------------------------
-    info "Deploying Ollama configuration into CT ${CTID}"
+    info "Deploying llama-server configuration into CT ${CTID}"
     pct push "$CTID" "$0" /root/11-setup-ollama.sh --perms 0755
     pct exec "$CTID" -- bash -c \
-        "DEBIAN_FRONTEND=noninteractive /root/11-setup-ollama.sh --configure"
-
-    # -----------------------------------------------------------------
-    # Pull default model
-    # -----------------------------------------------------------------
-    if [[ -n "$CT_MODEL" ]]; then
-        info "Pulling model: ${CT_MODEL} (this may take a while)"
-        pct exec "$CTID" -- ollama pull "$CT_MODEL"
-        info "Model ${CT_MODEL} ready"
-    fi
+        "CT_MODEL_URL='${CT_MODEL_URL}' CT_MODEL_PATH='${CT_MODEL_PATH}' CT_CTX_SIZE='${CT_CTX_SIZE}' CT_PARALLEL='${CT_PARALLEL}' DEBIAN_FRONTEND=noninteractive /root/11-setup-ollama.sh --configure"
 
     info "Done"
 }
@@ -259,14 +330,14 @@ configure_gpu_passthrough() {
     info "Configuring AMD GPU passthrough for CT ${ctid}"
 
     # Remove any previous GPU config to be idempotent
-    if grep -q "# GPU passthrough (Ollama)" "$conf" 2>/dev/null; then
+    if grep -q "# GPU passthrough" "$conf" 2>/dev/null; then
         info "Removing old GPU passthrough config"
-        sed -i '/# GPU passthrough (Ollama)/,$ d' "$conf"
+        sed -i '/# GPU passthrough/,$ d' "$conf"
     fi
 
     cat >> "$conf" <<'EOF'
 
-# GPU passthrough (Ollama)
+# GPU passthrough (llama.cpp Vulkan)
 lxc.cgroup2.devices.allow: c 226:* rwm
 lxc.mount.entry: /dev/dri dev/dri none bind,optional,create=dir
 lxc.cgroup2.devices.allow: c 511:* rwm
