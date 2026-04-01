@@ -22,6 +22,8 @@ graph TB
             BT["bittorrent<br/>192.168.1.116<br/>qBittorrent-nox"]
             NGINX["nginx-proxy<br/>192.168.1.118 (vmbr0)<br/>10.0.0.118 (vmbr1)<br/>10.1.0.118 (vmbr2)<br/>nginx + certbot"]
             PWEB["personal-web<br/>192.168.1.117<br/>node serve :3000"]
+            WOLF["wolf<br/>192.168.1.120<br/>Moonlight streaming"]
+            OLLAMA["ollama<br/>192.168.1.103<br/>Ollama :11434<br/>AMD 7900XTX GPU"]
         end
 
         NAS["NAS<br/>192.168.1.254<br/>NFS storage"]
@@ -49,6 +51,8 @@ graph TB
     PVE --- OBS
     PVE --- NGINX
     PVE --- PWEB
+    PVE --- WOLF
+    PVE --- OLLAMA
 
     style APTCACHE fill:#9f9,stroke:#333,color:#000
     style OBS fill:#9cf,stroke:#333,color:#000
@@ -59,6 +63,8 @@ graph TB
     style NAS fill:#fa0,stroke:#333,color:#000
     style PVE fill:#ccc,stroke:#333,color:#000
     style WOLHOSTS fill:#ddd,stroke:#999,color:#333
+    style WOLF fill:#c6f,stroke:#333,color:#000
+    style OLLAMA fill:#f6c,stroke:#333,color:#000
 ```
 
 ## VPN Kill Switch (Three Layers)
@@ -88,5 +94,7 @@ graph LR
 | 192.168.1.116 | bittorrent | 116 | LXC (privileged) | qBittorrent-nox, triple VPN enforcement |
 | 192.168.1.117 | personal-web | 117 | LXC (unprivileged) | Static file server (bailes.us) on :3000 |
 | 192.168.1.118 (vmbr0), 10.0.0.118 (vmbr1), 10.1.0.118 (vmbr2) | nginx-proxy | 118 | LXC (unprivileged, tri-homed) | nginx reverse proxy + certbot TLS for all web sites |
+| 192.168.1.120 | wolf | 120 | LXC (privileged, GPU passthrough) | Wolf cloud gaming (Moonlight streaming) |
+| 192.168.1.103 | ollama | 103 | LXC (privileged, AMD 7900XTX GPU) | Ollama LLM inference, OpenAI-compatible API on :11434 |
 | 192.168.1.253 | pve | N/A | Proxmox host | Hypervisor |
 | 192.168.1.254 | nas | N/A | NAS | NFS storage for downloads |
