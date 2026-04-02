@@ -25,7 +25,7 @@ Run each script directly on the Proxmox host, in order:
 
 # Phase 4: optional services
 ./10-setup-wolf.sh                # Wolf cloud gaming + Wolf Den (requires GPU)
-./11-setup-ollama.sh              # Ollama LLM inference (requires AMD GPU)
+./11-setup-ollama.sh              # llama.cpp LLM inference (requires AMD GPU)
 
 # 03-setup-obs.sh automatically deploys Promtail to apt-cache, bittorrent,
 # vpn-gateway, nginx-proxy, and personal-web after obs is configured.
@@ -47,7 +47,7 @@ All CTIDs are static. IPs follow the convention `X.X.X.{CTID}` on each network.
 | bittorrent | 116 | 192.168.1.116 |
 | personal-web | 117 | 192.168.1.117 |
 | nginx-proxy | 118 | 192.168.1.118 (LAN), 10.0.0.118 (WOL), 10.1.0.118 (ACK) |
-| ollama | 103 | 192.168.1.103 |
+| llm | 103 | 192.168.1.103 |
 
 ---
 
@@ -306,10 +306,10 @@ Select GPU for Wolf [1]:
 
 ---
 
-## 11 - Ollama (CTID 103, 192.168.1.103)
+## 11 - LLM Inference (CTID 103, 192.168.1.103)
 
-Privileged LXC container running Ollama for local LLM inference with AMD GPU
-acceleration (7900XTX via /dev/dri + /dev/kfd passthrough).
+Privileged LXC container running llama.cpp (Vulkan) for local LLM inference
+with AMD GPU acceleration (7900XTX via /dev/dri + /dev/kfd passthrough).
 
 ### Prerequisites
 
@@ -320,40 +320,39 @@ acceleration (7900XTX via /dev/dri + /dev/kfd passthrough).
 
 ```bash
 ./11-setup-ollama.sh                            # Defaults: CTID 103, 8 CPU, 64 GB RAM, 256 GB disk on large
-                                                #   pulls qwen3.5:27b after setup
-./11-setup-ollama.sh --model qwen3.5:9b         # Use a different model
-./11-setup-ollama.sh --no-model                 # Skip model pull
+                                                #   downloads Qwen3.5-27B Opus v2 Q4_K_M
+./11-setup-ollama.sh --model <url>              # Use a different HuggingFace GGUF URL
+./11-setup-ollama.sh --no-model                 # Skip model download
 ./11-setup-ollama.sh --deploy-only              # Re-deploy config to existing CT
 ```
 
 ### Default model
 
-`qwen3.5:27b` -- 27B parameter dense model, ~17 GB on disk. Fits entirely in
-the 7900XTX's 24 GB VRAM for fast inference (~29 tok/s generation, ~134 tok/s
-prompt eval).
+Qwen3.5-27B Claude Opus v2 distilled (Jackrong), Q4_K_M quantization. 16 GB
+on disk, fits entirely in the 7900XTX's 24 GB VRAM with 32k context window
+(~41 tok/s generation, ~721 tok/s prompt processing).
+
+See `homelab/llm-benchmarks.md` for full benchmark results across all tested models.
 
 ### Services
 
 | Service | Port | Purpose |
 |---------|------|---------|
-| Ollama | 11434 | OpenAI-compatible inference API |
+| llama-server | 8080 | OpenAI-compatible inference API |
 
 ### Firewall
 
-Port 11434 is restricted to `192.168.0.0/23` (home LAN) and localhost via
+Port 8080 is restricted to `192.168.0.0/23` (home LAN) and localhost via
 iptables rules inside the container.
 
 ### Quick start
 
 ```bash
 # Test API
-curl http://192.168.1.103:11434/api/version
+curl http://192.168.1.103:8080/v1/models
 
 # Chat (OpenAI-compatible)
-curl http://192.168.1.103:11434/v1/chat/completions \
+curl http://192.168.1.103:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model": "qwen3.5:27b", "messages": [{"role": "user", "content": "hello"}]}'
-
-# Pull additional models
-pct exec 103 -- ollama pull qwen3.5:27b
+  -d '{"model": "qwen3.5-27b-opus-v2", "messages": [{"role": "user", "content": "hello"}]}'
 ```
