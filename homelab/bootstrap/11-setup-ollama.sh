@@ -2,8 +2,9 @@
 # 11-setup-llm.sh -- Create an LXC with llama.cpp (Vulkan) and AMD GPU passthrough
 #
 # Migrated from Ollama to llama.cpp with Vulkan backend for ~47% higher decode
-# throughput on AMD GPUs (40 tok/s vs 28 tok/s on 7900XTX with 27B Q4_K_M).
-# See docs/proposals/done/llama-server-migration.md for benchmark details.
+# throughput on AMD GPUs (41 tok/s vs 28 tok/s on 7900XTX with 27B Q4_K_M).
+# Default model: Qwen3.5-27B Claude Opus v2 distilled (Jackrong), Q4_K_M.
+# See homelab/llm-benchmarks.md for full benchmark results.
 #
 # Runs on: the Proxmox host (creates an LXC, then pushes and configures)
 # Prereq: AMD GPU drivers (amdgpu) must be loaded on the Proxmox host
@@ -35,9 +36,9 @@ CT_CPU=8
 CT_RAM=65536
 CT_DISK=256
 CT_STORAGE="large"
-CT_MODEL_URL="https://huggingface.co/unsloth/Qwen3.5-27B-GGUF/resolve/main/Qwen3.5-27B-Q4_K_M.gguf"
-CT_MODEL_PATH="/opt/models/qwen35-27b-q4km.gguf"
-CT_CTX_SIZE=8192
+CT_MODEL_URL="https://huggingface.co/Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF/resolve/main/Qwen3.5-27B.Q4_K_M.gguf"
+CT_MODEL_PATH="/opt/qwen35-27b-opus-v2-q4km.gguf"
+CT_CTX_SIZE=32768
 CT_PARALLEL=2
 DEPLOY_ONLY=false
 
@@ -118,7 +119,7 @@ ExecStart=${llama_dir}/build/bin/llama-server \\
     --ctx-size ${CT_CTX_SIZE} \\
     --host 0.0.0.0 \\
     --port 8080 \\
-    --alias qwen3.5-27b \\
+    --alias qwen3.5-27b-opus-v2 \\
     --parallel ${CT_PARALLEL} \\
     --flash-attn on
 Restart=on-failure
