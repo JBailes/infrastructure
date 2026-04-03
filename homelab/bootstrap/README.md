@@ -26,6 +26,7 @@ Run each script directly on the Proxmox host, in order:
 # Phase 4: optional services
 ./10-setup-wolf.sh                # Wolf cloud gaming + Wolf Den (requires GPU)
 ./11-setup-ollama.sh              # llama.cpp LLM inference (requires AMD GPU)
+./12-setup-media-stack.sh         # Media automation (Prowlarr, Sonarr, Radarr, Lidarr, Readarr)
 
 # 03-setup-obs.sh automatically deploys Promtail to apt-cache, bittorrent,
 # vpn-gateway, nginx-proxy, and personal-web after obs is configured.
@@ -47,6 +48,7 @@ All CTIDs are static. IPs follow the convention `X.X.X.{CTID}` on each network.
 | bittorrent | 116 | 192.168.1.116 |
 | personal-web | 117 | 192.168.1.117 |
 | nginx-proxy | 118 | 192.168.1.118 (LAN), 10.0.0.118 (WOL), 10.1.0.118 (ACK) |
+| media-stack | 119 | 192.168.1.119 |
 | llm | 103 | 192.168.1.103 |
 
 ---
@@ -355,4 +357,57 @@ curl http://192.168.1.103:8080/v1/models
 curl http://192.168.1.103:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "qwen3.5-27b-opus-v2", "messages": [{"role": "user", "content": "hello"}]}'
+```
+
+---
+
+## 12 - Media Stack (CTID 119, 192.168.1.119)
+
+Privileged LXC container running the media automation stack via Docker Compose.
+All services route through the VPN gateway (192.168.1.104).
+
+- **eth0**: 192.168.1.119/23 on vmbr0 (LAN, gateway = VPN gateway)
+
+### Prerequisites
+
+- VPN gateway (VMID 104, 192.168.1.104) must be running
+- BitTorrent LXC (CT 116, 192.168.1.116) must be running
+- NAS NFS export `192.168.1.254:/mnt/data/storage` must be accessible
+
+### Services
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| Prowlarr | 9696 | Centralized indexer manager |
+| Sonarr | 8989 | TV series automation |
+| Radarr | 7878 | Movie automation |
+| Lidarr | 8686 | Music automation |
+| Readarr | 8787 | Books/audiobooks automation |
+
+All services connect to qBittorrent at 192.168.1.116:8080 with per-app
+download categories (sonarr, radarr, lidarr, readarr).
+
+### Storage
+
+Single NFS mount at `/mnt/storage` (maps to `192.168.1.254:/mnt/data/storage`)
+enables hardlinks between downloads and media libraries:
+
+| Path | Purpose |
+|------|---------|
+| `/mnt/storage/bittorrent/complete/{category}` | Completed downloads per app |
+| `/mnt/storage/video/TV Shows/` | TV library |
+| `/mnt/storage/video/Movies/` | Movie library |
+| `/mnt/storage/music/` | Music library |
+| `/mnt/storage/books/` | Books library |
+
+### Backups
+
+Config databases are backed up daily at 03:00 to
+`/mnt/storage/backup/media-stack/` with 14-day retention.
+
+### Usage
+
+```bash
+./12-setup-media-stack.sh               # Create CT and configure
+./12-setup-media-stack.sh --deploy-only  # Re-run configuration on existing CT
 ```
