@@ -150,6 +150,9 @@ configure_blackbox_scrape() {
       - targets: ['http://192.168.1.119:8989/ping']
         labels:
           name: sonarr
+      - targets: ['http://192.168.1.119:8990/ping']
+        labels:
+          name: sonarr-anime
       - targets: ['http://192.168.1.119:7878/ping']
         labels:
           name: radarr
@@ -367,7 +370,7 @@ YAML
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "probe_success{job=\"blackbox\", name=~\"prowlarr|sonarr|radarr|lidarr|readarr\"}",
+          "expr": "probe_success{job=\"blackbox\", name=~\"prowlarr|sonarr|sonarr-anime|radarr|lidarr|readarr\"}",
           "legendFormat": "{{name}}"
         }
       ],
@@ -841,6 +844,7 @@ Blackbox probes added for:
   - bittorrent (192.168.1.116:8080)
   - prowlarr (192.168.1.119:9696)
   - sonarr (192.168.1.119:8989)
+  - sonarr-anime (192.168.1.119:8990)
   - radarr (192.168.1.119:7878)
   - lidarr (192.168.1.119:8686)
   - readarr (192.168.1.119:8787)

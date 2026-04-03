@@ -124,6 +124,7 @@ FSTAB
 
         # Ensure category download directories exist for qBittorrent
         mkdir -p "$MOUNT_POINT/bittorrent/complete/sonarr"
+        mkdir -p "$MOUNT_POINT/bittorrent/complete/sonarr-anime"
         mkdir -p "$MOUNT_POINT/bittorrent/complete/radarr"
         mkdir -p "$MOUNT_POINT/bittorrent/complete/lidarr"
         mkdir -p "$MOUNT_POINT/bittorrent/complete/readarr"
@@ -184,6 +185,26 @@ services:
       - ${STORAGE}:/mnt/storage
     ports:
       - "8989:8989"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8989/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  sonarr-anime:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr-anime
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - sonarr-anime-config:/config
+      - ${STORAGE}:/mnt/storage
+    ports:
+      - "8990:8989"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8989/ping"]
@@ -255,6 +276,7 @@ services:
 volumes:
   prowlarr-config:
   sonarr-config:
+  sonarr-anime-config:
   radarr-config:
   lidarr-config:
   readarr-config:
@@ -286,7 +308,7 @@ COMPOSE
         fi
 
         # Create categories with save paths relative to the default save path
-        for cat in sonarr radarr lidarr readarr; do
+        for cat in sonarr sonarr-anime radarr lidarr readarr; do
             curl -sf -X POST "${qbit_url}/api/v2/torrents/createCategory" \
                 --data-urlencode "category=${cat}" \
                 --data-urlencode "savePath=/mnt/torrents/complete/${cat}" \
@@ -309,7 +331,7 @@ COMPOSE
         sleep 15
 
         local all_ok=true
-        for svc in prowlarr sonarr radarr lidarr readarr; do
+        for svc in prowlarr sonarr sonarr-anime radarr lidarr readarr; do
             local state
             state=$(docker inspect --format='{{.State.Health.Status}}' "$svc" 2>/dev/null || echo "unknown")
             if [[ "$state" == "healthy" ]]; then
@@ -399,7 +421,7 @@ BTIMER
             done
         info "All Docker services running"
 
-        for port in 9696 8989 7878 8686 8787; do
+        for port in 9696 8989 8990 7878 8686 8787; do
             curl -sf "http://localhost:${port}/ping" &>/dev/null \
                 || info "  WARN: port ${port} not responding yet (service may still be starting)"
         done
@@ -424,9 +446,10 @@ BTIMER
 media-stack LXC setup complete ($LOCAL_IP).
 
 Services:
-  Prowlarr:  http://$LOCAL_IP:9696
-  Sonarr:    http://$LOCAL_IP:8989
-  Radarr:    http://$LOCAL_IP:7878
+  Prowlarr:      http://$LOCAL_IP:9696
+  Sonarr:        http://$LOCAL_IP:8989
+  Sonarr Anime:  http://$LOCAL_IP:8990
+  Radarr:        http://$LOCAL_IP:7878
   Lidarr:    http://$LOCAL_IP:8686
   Readarr:   http://$LOCAL_IP:8787
 
