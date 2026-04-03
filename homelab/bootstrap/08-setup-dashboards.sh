@@ -144,6 +144,21 @@ configure_blackbox_scrape() {
       - targets: ['http://192.168.1.116:8080']
         labels:
           name: bittorrent
+      - targets: ['http://192.168.1.119:9696/ping']
+        labels:
+          name: prowlarr
+      - targets: ['http://192.168.1.119:8989/ping']
+        labels:
+          name: sonarr
+      - targets: ['http://192.168.1.119:7878/ping']
+        labels:
+          name: radarr
+      - targets: ['http://192.168.1.119:8686/ping']
+        labels:
+          name: lidarr
+      - targets: ['http://192.168.1.119:8787/ping']
+        labels:
+          name: readarr
       - targets: ['http://192.168.1.117:3000']
         labels:
           name: personal-web
@@ -345,10 +360,46 @@ YAML
       }
     },
     {
+      "id": 7,
+      "title": "Media Stack",
+      "type": "stat",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "probe_success{job=\"blackbox\", name=~\"prowlarr|sonarr|radarr|lidarr|readarr\"}",
+          "legendFormat": "{{name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "text": "DOWN", "color": "red" } }, "type": "value" },
+            { "options": { "1": { "text": "UP", "color": "green" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      }
+    },
+    {
       "id": 2,
       "title": "WOL Shared",
       "type": "stat",
-      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 5 },
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
@@ -404,7 +455,7 @@ YAML
       "id": 3,
       "title": "WOL Prod",
       "type": "stat",
-      "gridPos": { "h": 3, "w": 12, "x": 0, "y": 8 },
+      "gridPos": { "h": 3, "w": 12, "x": 0, "y": 11 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
@@ -448,7 +499,7 @@ YAML
       "id": 4,
       "title": "WOL Test",
       "type": "stat",
-      "gridPos": { "h": 3, "w": 12, "x": 12, "y": 8 },
+      "gridPos": { "h": 3, "w": 12, "x": 12, "y": 11 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
@@ -492,7 +543,7 @@ YAML
       "id": 5,
       "title": "ACK Services",
       "type": "stat",
-      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 11 },
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 14 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
@@ -536,7 +587,7 @@ YAML
       "id": 6,
       "title": "Observability",
       "type": "stat",
-      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 14 },
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 17 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
@@ -788,6 +839,11 @@ Blackbox probes added for:
   - wolf (192.168.1.120:47989)
   - wolf-den (192.168.1.120:8080)
   - bittorrent (192.168.1.116:8080)
+  - prowlarr (192.168.1.119:9696)
+  - sonarr (192.168.1.119:8989)
+  - radarr (192.168.1.119:7878)
+  - lidarr (192.168.1.119:8686)
+  - readarr (192.168.1.119:8787)
   - personal-web (192.168.1.117:3000)
   - nginx-proxy (192.168.1.118:80)
   - unifi (192.168.1.102:8443, HTTPS)
