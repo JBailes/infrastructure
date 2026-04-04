@@ -349,6 +349,108 @@ COMPOSE
         fi
     }
 
+    # -- Prowlarr: register *arr applications for indexer sync
+    configure_prowlarr_sync() {
+        info "Configuring Prowlarr application sync"
+
+        local prowlarr_url="http://localhost:9696"
+        local max_wait=60
+        local elapsed=0
+
+        # Wait for Prowlarr API
+        while [[ $elapsed -lt $max_wait ]]; do
+            if curl -sf "${prowlarr_url}/ping" &>/dev/null; then
+                break
+            fi
+            sleep 2
+            elapsed=$((elapsed + 2))
+        done
+
+        if ! curl -sf "${prowlarr_url}/ping" &>/dev/null; then
+            info "WARN: Prowlarr not responding at ${prowlarr_url}, skipping sync config"
+            info "      Configure Prowlarr applications manually"
+            return
+        fi
+
+        # Extract API keys from each service's config.xml
+        local prowlarr_key sonarr_key sonarr_anime_key radarr_key lidarr_key readarr_key
+        prowlarr_key=$(docker exec prowlarr cat /config/config.xml | sed -n 's/.*<ApiKey>\(.*\)<\/ApiKey>.*/\1/p')
+        sonarr_key=$(docker exec sonarr cat /config/config.xml | sed -n 's/.*<ApiKey>\(.*\)<\/ApiKey>.*/\1/p')
+        sonarr_anime_key=$(docker exec sonarr-anime cat /config/config.xml | sed -n 's/.*<ApiKey>\(.*\)<\/ApiKey>.*/\1/p')
+        radarr_key=$(docker exec radarr cat /config/config.xml | sed -n 's/.*<ApiKey>\(.*\)<\/ApiKey>.*/\1/p')
+        lidarr_key=$(docker exec lidarr cat /config/config.xml | sed -n 's/.*<ApiKey>\(.*\)<\/ApiKey>.*/\1/p')
+        readarr_key=$(docker exec readarr cat /config/config.xml | sed -n 's/.*<ApiKey>\(.*\)<\/ApiKey>.*/\1/p')
+
+        if [[ -z "$prowlarr_key" ]]; then
+            info "WARN: Could not read Prowlarr API key, skipping sync config"
+            return
+        fi
+
+        local api="${prowlarr_url}/api/v1/applications"
+        local auth="X-Api-Key: ${prowlarr_key}"
+
+        # Check if applications are already configured
+        local existing
+        existing=$(curl -s -H "$auth" "$api" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+        if [[ "$existing" -gt 0 ]]; then
+            info "Prowlarr already has ${existing} application(s) configured, skipping"
+            return
+        fi
+
+        # Helper: add an application to Prowlarr
+        add_prowlarr_app() {
+            local name="$1" impl="$2" contract="$3" base_url="$4" app_key="$5" cats="$6" extra="${7:-}"
+
+            local fields="[
+                {\"name\": \"prowlarrUrl\", \"value\": \"http://prowlarr:9696\"},
+                {\"name\": \"baseUrl\", \"value\": \"${base_url}\"},
+                {\"name\": \"apiKey\", \"value\": \"${app_key}\"},
+                {\"name\": \"syncCategories\", \"value\": ${cats}}
+                ${extra}
+            ]"
+
+            local payload="{
+                \"syncLevel\": \"fullSync\",
+                \"name\": \"${name}\",
+                \"implementation\": \"${impl}\",
+                \"configContract\": \"${contract}\",
+                \"fields\": ${fields}
+            }"
+
+            local result
+            result=$(curl -s -X POST -H "$auth" -H "Content-Type: application/json" "$api" -d "$payload")
+            if echo "$result" | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if 'id' in d else 1)" 2>/dev/null; then
+                info "  ${name}: registered"
+            else
+                info "  WARN: ${name}: failed to register"
+            fi
+        }
+
+        add_prowlarr_app "Sonarr" "Sonarr" "SonarrSettings" \
+            "http://sonarr:8989" "$sonarr_key" \
+            "[5000,5010,5020,5030,5040,5045,5050,5090]" \
+            ',{"name":"animeSyncCategories","value":[5070]},{"name":"syncAnimeStandardFormatSearch","value":true}'
+
+        add_prowlarr_app "Sonarr Anime" "Sonarr" "SonarrSettings" \
+            "http://sonarr-anime:8989" "$sonarr_anime_key" \
+            "[5000,5010,5020,5030,5040,5045,5050,5090]" \
+            ',{"name":"animeSyncCategories","value":[5070]},{"name":"syncAnimeStandardFormatSearch","value":true}'
+
+        add_prowlarr_app "Radarr" "Radarr" "RadarrSettings" \
+            "http://radarr:7878" "$radarr_key" \
+            "[2000,2010,2020,2030,2040,2045,2050,2060,2070,2080,2090]"
+
+        add_prowlarr_app "Lidarr" "Lidarr" "LidarrSettings" \
+            "http://lidarr:8686" "$lidarr_key" \
+            "[3000,3010,3030,3040,3050,3060]"
+
+        add_prowlarr_app "Readarr" "Readarr" "ReadarrSettings" \
+            "http://readarr:8787" "$readarr_key" \
+            "[3030,7000,7010,7020,7030,7040,7050,7060]"
+
+        info "Prowlarr application sync configured (fullSync mode)"
+    }
+
     # -- Config backup cron
     setup_backup() {
         info "Setting up configuration backup"
@@ -437,6 +539,7 @@ BTIMER
     write_compose
     setup_qbittorrent_categories
     start_services
+    configure_prowlarr_sync
     setup_backup
     verify
 
