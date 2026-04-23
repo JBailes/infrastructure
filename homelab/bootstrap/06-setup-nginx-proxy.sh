@@ -15,7 +15,7 @@
 #
 # Central nginx reverse proxy for all web sites. Handles TLS termination
 # via certbot and routes by Host header to the appropriate backend:
-#   ackmud.com      -> wol-web (10.0.0.209:5000)
+#   ackmud.com      -> ack-web (10.1.0.247:5000)
 #   aha.ackmud.com  -> ack-web (10.1.0.247:5000) + stream for WSS ports
 #   bailes.us       -> personal-web (192.168.1.117:3000)
 
@@ -85,11 +85,11 @@ configure() {
 nginx-proxy is ready (tri-homed).
 
 LAN:  $LAN_IP (eth0, vmbr0) -- incoming HTTPS from router
-WOL:  $WOL_IP (eth1, vmbr1) -- reach wol-web (10.0.0.209:5000)
+WOL:  $WOL_IP (eth1, vmbr1) -- shared/private WOL reachability
 ACK:  $ACK_IP (eth2, vmbr2) -- reach ack-web (10.1.0.247:5000)
 
 Routing:
-  ackmud.com      -> http://10.0.0.209:5000 (wol-web)
+  ackmud.com      -> http://10.1.0.247:5000 (ack-web)
   aha.ackmud.com  -> http://10.1.0.247:5000 (ack-web)
   bailes.us       -> http://192.168.1.117:3000 (personal-web)
   WSS :18890      -> 10.1.0.247:18890
@@ -198,7 +198,7 @@ server {
     server_name ackmud.com www.ackmud.com;
 
     location / {
-        proxy_pass http://10.0.0.209:5000;
+        proxy_pass http://10.1.0.247:5000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -220,7 +220,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # WebSocket support for Blazor SignalR
+    # Preserve upgrade support for any ACK frontend websocket traffic.
     location /ws {
         proxy_pass http://10.1.0.247:5000;
         proxy_http_version 1.1;

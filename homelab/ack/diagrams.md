@@ -30,7 +30,7 @@ graph TB
             ASS["assault30<br/>10.1.0.245<br/>:4000"]
         end
 
-        ACKWEB["ack-web<br/>10.1.0.247<br/>:5000 (Kestrel)<br/>aha.ackmud.com"]
+        ACKWEB["ack-web<br/>10.1.0.247<br/>:5000 (node)<br/>aha.ackmud.com"]
 
         TNGAI["tng-ai<br/>10.1.0.248<br/>:8000 (uvicorn)<br/>NPC dialogue"]
         TNGDB["tngdb<br/>10.1.0.249<br/>:8000 (uvicorn)<br/>game content API"]
@@ -159,7 +159,7 @@ graph TB
 | 10.1.0.244 | ack41 | 244 | vmbr2 | ACK! 4.1 MUD server |
 | 10.1.0.245 | assault30 | 245 | vmbr2 | Assault 3.0 MUD server |
 | 10.1.0.246 | ack-db | 246 | vmbr2 | PostgreSQL database (acktng) |
-| 10.1.0.247 | ack-web | 247 | vmbr2 | AHA web frontend (aha.ackmud.com) |
+| 10.1.0.247 | ack-web | 247 | vmbr2 | AHA web app (aha.ackmud.com) |
 | 10.1.0.248 | tng-ai | 248 | vmbr2 | NPC dialogue AI (Python/FastAPI/Groq) |
 | 10.1.0.249 | tngdb | 249 | vmbr2 | Read-only game content API (Python/FastAPI) |
 | 10.1.0.115 | apt-cache | 115 | vmbr0 + vmbr1 + vmbr2 | Package cache (shared) |

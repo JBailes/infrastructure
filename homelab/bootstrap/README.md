@@ -198,7 +198,7 @@ LXC containers, or via `scp`/`ssh` for the vpn-gateway VM.
 Tri-homed LXC container running nginx as a central reverse proxy for all web
 sites. Handles TLS termination via certbot and routes by Host header:
 
-- **ackmud.com** -> wol-web (10.0.0.209:5000) via WOL network
+- **ackmud.com** -> ack-web (10.1.0.247:5000) via ACK network
 - **aha.ackmud.com** -> ack-web (10.1.0.247:5000) via ACK network
 - **bailes.us** -> personal-web (192.168.1.117:3000) via LAN
 
@@ -206,10 +206,10 @@ Also proxies legacy MUD WebSocket traffic (ports 18890, 8891, 8892) to ack-web
 via TCP stream blocks.
 
 - **eth0**: 192.168.1.118/23 on vmbr0 (LAN, incoming HTTPS from router)
-- **eth1**: 10.0.0.118/20 on vmbr1 (WOL, reach wol-web)
+- **eth1**: 10.0.0.118/20 on vmbr1 (WOL/shared infrastructure reachability)
 - **eth2**: 10.1.0.118/24 on vmbr2 (ACK, reach ack-web)
 
-Backend servers run only their app server (Kestrel/.NET or node serve) with no
+Backend servers run only their app server (node or service runtime) with no
 nginx or TLS of their own. All certificate management is centralized here.
 
 ---

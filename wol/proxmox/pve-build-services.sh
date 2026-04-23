@@ -45,7 +45,6 @@ SERVICES=(
     "wol-realm|git@github.com:JBailes/wol-realm.git|Wol.Realm/Wol.Realm.csproj|/usr/lib/wol-realm/app|wol-realm:wol-realm|wol-realm|wol-realm-prod wol-realm-test"
     "wol|git@github.com:JBailes/wol.git|Wol.Server/Wol.Server.csproj|/usr/lib/wol/app|wol:wol|wol|wol-a"
     "wol-ai|git@github.com:JBailes/wol-ai.git|src/Wol.Ai/Wol.Ai.csproj|/usr/lib/wol-ai|wol-ai:wol-ai|wol-ai|wol-ai-prod wol-ai-test"
-    "wol-web|git@github.com:JBailes/web-wol.git|WolWeb.Host/WolWeb.Host.csproj|/opt/wol-web/publish|wol-web:wol-web|wolweb|wol-web"
 )
 
 # ---------------------------------------------------------------------------

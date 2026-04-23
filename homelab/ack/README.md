@@ -21,7 +21,7 @@ This creates the bridge, all containers, bootstraps the gateway and MUD servers,
 | 244 | ack41 | 10.1.0.244 | ACK! 4.1 MUD server |
 | 245 | assault30 | 10.1.0.245 | Assault 3.0 MUD server |
 | 246 | ack-db | 10.1.0.246 | PostgreSQL database (acktng) |
-| 247 | ack-web | 10.1.0.247 | AHA web frontend (aha.ackmud.com) |
+| 247 | ack-web | 10.1.0.247 | ACK web app (ackmud.com + aha.ackmud.com) |
 | 248 | tng-ai | 10.1.0.248 | NPC dialogue AI (Python/FastAPI/Groq) |
 | 249 | tngdb | 10.1.0.249 | Read-only game content API (Python/FastAPI) |
 
@@ -51,11 +51,11 @@ All ACK hosts run Promtail, shipping logs to obs at 10.1.0.100:3100 (Loki tenant
 
 Logs are viewable in Grafana (http://192.168.1.100) under the **Loki (ACK)** datasource with query `{host!=""}`.
 
-## AHA Website (aha.ackmud.com)
+## ACK Websites (`aha.ackmud.com`, `ackmud.com`)
 
-The ACK Historical Archive (AHA) website runs on ack-web (CT 247, 10.1.0.247). It serves aha.ackmud.com as a Blazor WASM app with an ASP.NET Core API backend on port 5000. TLS termination is handled by nginx-proxy (10.1.0.118 on the ACK network, 192.168.1.118 on the LAN).
+The ACK web host runs on ack-web (CT 247, 10.1.0.247). It serves both `aha.ackmud.com` and `ackmud.com` from the `ackmudhistoricalarchive/web` repo on port 5000. TLS termination is handled by nginx-proxy (10.1.0.118 on the ACK network, 192.168.1.118 on the LAN).
 
-Legacy MUD WebSocket connections (ports 18890, 8891, 8892) are also proxied through nginx-proxy to ack-web.
+The app preserves the legacy ACK web surface: `/api/who`, `/api/gsgp`, and `/api/reference/*`, backed by the live ACKTNG game host (`10.1.0.241:8080`) and a local clone of the `acktng` data tree for help, shelp, and lore files.
 
 ## Services
 
@@ -70,7 +70,7 @@ All MUD servers run under systemd (`mud.service`), created by the bootstrap. The
 | assault30 (CT 245) | Assault 3.0 MUD | mud.service | :4000 |
 | tng-ai (CT 248) | NPC dialogue AI | tng-ai.service | :8000 |
 | tngdb (CT 249) | Game content API | tngdb.service | :8000 |
-| ack-web (CT 247) | AHA website | ackweb.service | :5000 |
+| ack-web (CT 247) | AHA website | ack-web.service | :5000 |
 
 ## Connecting to a MUD
 
@@ -108,7 +108,7 @@ pct exec 241 -- bash -c "cd /opt/mud/src && ./startup &"
 | `01-setup-ack-mud.sh` | MUD server host (build tools, directory structure) |
 | `02-setup-promtail.sh` | Promtail log shipper (deployed to all ACK hosts) |
 | `03-setup-ack-db.sh` | PostgreSQL database host (acktng database, postgres_exporter) |
-| `04-setup-ack-web.sh` | AHA web frontend (.NET Kestrel on :5000) |
+| `04-setup-ack-web.sh` | AHA web app (`ack-web`, node service on :5000) |
 | `05-setup-tng-ai.sh` | NPC dialogue AI (Python/FastAPI/Groq on :8000) |
 | `06-setup-tngdb.sh` | Read-only game content API (Python/FastAPI on :8000) |
 
