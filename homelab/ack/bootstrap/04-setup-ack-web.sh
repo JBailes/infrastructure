@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 04-setup-ack-web.sh -- Bootstrap ack-web (AHA website) on the ACK network
+# 04-setup-ack-web.sh -- Bootstrap ack-web (ackmud.com + aha.ackmud.com) on the ACK network
 #
 # Runs on: ack-web (10.1.0.247) -- Debian 13 LXC (unprivileged, single-homed)
 # CTID: 247
@@ -8,7 +8,7 @@
 #   ./04-setup-ack-web.sh --configure    # Run inside the container
 #
 # Single-homed on vmbr2 (ACK network, 10.1.0.0/24).
-# Runs .NET Kestrel on :5000 serving aha.ackmud.com (Blazor WASM + API).
+# Runs the ack-web app on :5000 (frontend + node API).
 # nginx-proxy (10.1.0.118) handles TLS termination and proxies here.
 #
 # Health endpoint: GET /health on :5000
@@ -17,9 +17,11 @@ set -euo pipefail
 
 ACK_NET="10.1.0.0/24"
 ACK_GW="10.1.0.240"
+RUNTIME_DIR="/opt/ack-web/runtime"
 
 err()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
+warn() { echo "WARN: $*" >&2; }
 
 # ---------------------------------------------------------------------------
 # Container-side: configure everything
@@ -33,10 +35,10 @@ configure() {
     disable_ipv6
     configure_dns_resolver
     install_packages
-    install_dotnet
     setup_service_user
-    clone_repo
-    build_and_publish
+    stage_repo
+    stage_acktng_data
+    build_app
     install_service
     configure_firewall
 
@@ -46,8 +48,8 @@ configure() {
 ack-web is ready (single-homed on ACK network).
 
 IP:     10.1.0.247 (eth0, vmbr2)
-Site:   aha.ackmud.com (Blazor WASM + API)
-App:    .NET Kestrel on :5000 (no nginx, no TLS)
+Sites:  ackmud.com + aha.ackmud.com
+App:    node server on :5000 (frontend + API, no TLS on host)
 Health: GET /health on :5000
 TLS:    handled by nginx-proxy (10.1.0.118)
 
@@ -85,70 +87,25 @@ RESOLV
 # ---------------------------------------------------------------------------
 
 install_packages() {
-    info "Installing packages"
-    apt-get update -qq
-    apt-get install -y --no-install-recommends \
-        curl ca-certificates chrony iptables git
-}
+    local packages=(
+        ca-certificates
+        chrony
+        iptables
+        git
+    )
 
-# ---------------------------------------------------------------------------
-# .NET 9 SDK (via dotnet-install.sh + caching proxy on nginx-proxy)
-# ---------------------------------------------------------------------------
-
-DOTNET_ROOT="/usr/local/dotnet"
-DOTNET_CACHE_URL="http://10.1.0.118:8080"
-DOTNET_CACHE_DIRECT="https://dotnetcli.azureedge.net"
-
-install_dotnet() {
-    if dotnet --list-sdks 2>/dev/null | grep -q "^9\."; then
-        info ".NET 9 SDK already installed"
+    if ! command -v apt-get >/dev/null; then
+        warn "apt-get not available; skipping package installation"
         return
     fi
 
-    local script="/tmp/dotnet-install.sh"
-    if [[ ! -f "$script" ]]; then
-        curl -fsSL https://dot.net/v1/dotnet-install.sh -o "$script"
-        chmod +x "$script"
-    fi
-
-    info "Installing .NET 9 SDK via dotnet-install.sh"
-    if ! bash "$script" --channel 9.0 --install-dir "$DOTNET_ROOT" --azure-feed "$DOTNET_CACHE_URL" 2>/dev/null; then
-        info "Cache unreachable, downloading .NET directly from Microsoft"
-        bash "$script" --channel 9.0 --install-dir "$DOTNET_ROOT" --azure-feed "$DOTNET_CACHE_DIRECT"
-    fi
-    ln -sf "$DOTNET_ROOT/dotnet" /usr/local/bin/dotnet
-    info ".NET 9 SDK installed"
-}
-
-# ---------------------------------------------------------------------------
-# Clone ack-web repo
-# ---------------------------------------------------------------------------
-
-clone_repo() {
-    local web_dir="/opt/ack-web"
-
-    if [[ -d "$web_dir/.git" ]]; then
-        info "web-tng repo already cloned, pulling latest"
-        cd "$web_dir" && git pull || true
+    info "Installing base packages"
+    if ! apt-get update -qq; then
+        warn "apt-get update failed; assuming required base packages are already present"
         return
     fi
 
-    info "Cloning web-tng repo"
-    git clone https://github.com/JBailes/web-tng.git "$web_dir"
-}
-
-# ---------------------------------------------------------------------------
-# Build and publish
-# ---------------------------------------------------------------------------
-
-build_and_publish() {
-    local web_dir="/opt/ack-web"
-    info "Publishing AckWeb.Api"
-    cd "$web_dir"
-    dotnet publish AckWeb.Api/AckWeb.Api.csproj \
-        --configuration Release \
-        --output "$web_dir/publish/api"
-    chown -R ack-web:ack-web "$web_dir"
+    apt-get install -y --no-install-recommends "${packages[@]}"
 }
 
 # ---------------------------------------------------------------------------
@@ -160,22 +117,135 @@ setup_service_user() {
         info "Service user ack-web already exists"
         return
     fi
+
     info "Creating service user ack-web"
-    useradd --system --no-create-home --shell /usr/sbin/nologin ack-web
+    useradd --system --create-home --home-dir /var/lib/ack-web --shell /usr/sbin/nologin ack-web
 }
 
 # ---------------------------------------------------------------------------
-# Systemd service
+# Stage ack-web source
+# ---------------------------------------------------------------------------
+
+stage_repo() {
+    local web_dir="/opt/ack-web"
+    rm -rf "$web_dir"
+
+    if [[ -d /root/ack-web-src ]]; then
+        info "Using staged local ack-web source"
+        cp -a /root/ack-web-src "$web_dir"
+    else
+        info "Cloning web repo"
+        git clone https://github.com/ackmudhistoricalarchive/web.git "$web_dir"
+    fi
+
+    if [[ -d /root/ack-web-runtime ]]; then
+        info "Using staged node runtime"
+        rm -rf "$RUNTIME_DIR"
+        mkdir -p "$(dirname "$RUNTIME_DIR")"
+        cp -a /root/ack-web-runtime "$RUNTIME_DIR"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Stage acktng reference data
+# ---------------------------------------------------------------------------
+
+stage_acktng_data() {
+    local acktng_dir="/opt/acktng"
+
+    if [[ -d /root/acktng-src ]]; then
+        info "Using staged acktng data"
+        rm -rf "$acktng_dir"
+        cp -a /root/acktng-src "$acktng_dir"
+        return
+    fi
+
+    if [[ -d "$acktng_dir/.git" ]]; then
+        info "acktng repo already present, refreshing"
+        git -C "$acktng_dir" pull --ff-only || true
+        return
+    fi
+
+    info "Cloning acktng data repo"
+    rm -rf "$acktng_dir"
+    git clone https://github.com/ackmudhistoricalarchive/acktng.git "$acktng_dir"
+}
+
+# ---------------------------------------------------------------------------
+# Build app
+# ---------------------------------------------------------------------------
+
+build_app() {
+    local web_dir="/opt/ack-web"
+    local node_bin="${RUNTIME_DIR}/bin/node"
+    local npm_bin="${RUNTIME_DIR}/bin/npm"
+
+    cd "$web_dir"
+
+    if [[ -f "$web_dir/dist/index.html" ]]; then
+        info "Using staged ack-web build output"
+    elif [[ -x "$npm_bin" ]]; then
+        info "Building ack-web app with staged node runtime"
+        PATH="${RUNTIME_DIR}/bin:${PATH}" "$npm_bin" ci
+        PATH="${RUNTIME_DIR}/bin:${PATH}" "$npm_bin" run build
+    elif command -v npm >/dev/null 2>&1; then
+        info "Building ack-web app with system npm"
+        npm ci
+        npm run build
+    else
+        err "No build output and no npm available. Stage a built web checkout or a node runtime."
+    fi
+
+    if [[ ! -f "$web_dir/dist/index.html" ]]; then
+        err "ack-web build output missing: $web_dir/dist/index.html"
+    fi
+
+    if [[ ! -x "$node_bin" ]] && ! command -v node >/dev/null 2>&1; then
+        err "No node runtime available. Stage /root/ack-web-runtime or install node on the host."
+    fi
+
+    chown -R ack-web:ack-web "$web_dir" /opt/acktng
+}
+
+# ---------------------------------------------------------------------------
+# systemd service
 # ---------------------------------------------------------------------------
 
 install_service() {
-    local web_dir="/opt/ack-web"
-    info "Installing systemd service"
-    cp "$web_dir/systemd/ackweb.service" /etc/systemd/system/ackweb.service
+    info "Installing ack-web systemd service"
+
+    local node_exec="/usr/bin/node"
+    if [[ -x "${RUNTIME_DIR}/bin/node" ]]; then
+        node_exec="${RUNTIME_DIR}/bin/node"
+    elif command -v node >/dev/null 2>&1; then
+        node_exec="$(command -v node)"
+    else
+        err "Could not locate a node runtime for ack-web.service"
+    fi
+
+    cat > /etc/systemd/system/ack-web.service <<EOF
+[Unit]
+Description=ACK Historical Archive web app
+After=network.target
+
+[Service]
+Type=simple
+User=ack-web
+WorkingDirectory=/opt/ack-web
+Environment=PORT=5000
+Environment=ACKTNG_DIR=/opt/acktng
+Environment=ACKTNG_GAME_URL=http://10.1.0.241:8080
+ExecStart=${node_exec} /opt/ack-web/server/app-server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
     systemctl daemon-reload
-    systemctl enable ackweb.service
-    systemctl restart ackweb.service
-    info "ackweb.service enabled and started"
+    systemctl enable ack-web.service
+    systemctl restart ack-web.service
 }
 
 # ---------------------------------------------------------------------------
@@ -194,7 +264,7 @@ configure_firewall() {
     iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
     iptables -A INPUT -i lo -j ACCEPT
 
-    # Kestrel on :5000 from ACK network (nginx-proxy at 10.1.0.118 connects here)
+    # ack-web node server on :5000 from ACK network (nginx-proxy at 10.1.0.118 connects here)
     iptables -A INPUT -s "$ACK_NET" -p tcp --dport 5000 -j ACCEPT
 
     # SSH from ACK network

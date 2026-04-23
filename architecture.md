@@ -24,7 +24,6 @@ graph TB
             GWAB["wol-gateway-a/b<br/>10.0.0.200 / 10.0.0.201<br/>NAT, DNS, NTP"]
             WOLHOSTS["prod + shared hosts<br/>(infra, APIs, DBs,<br/>game engine, obs)"]
             WOLA["wol-a<br/>:6969 external"]
-            WOLWEB["wol-web<br/>:5000 (Kestrel)"]
         end
 
         subgraph VMBR3["vmbr3 -- WOL Test (10.0.1.0/24)"]
@@ -35,7 +34,7 @@ graph TB
             ACKGW["ack-gateway<br/>10.1.0.240 / 192.168.1.240<br/>NAT, DNS, port fwd"]
             ACKDB["ack-db<br/>10.1.0.246<br/>:5432 (PostgreSQL)"]
             MUDS["5 MUD servers<br/>10.1.0.241-245"]
-            ACKWEB["ack-web<br/>10.1.0.247<br/>:5000 (Kestrel)"]
+            ACKWEB["ack-web<br/>10.1.0.247<br/>:5000 (node)"]
             TNGAI["tng-ai<br/>10.1.0.248<br/>:8000 (NPC dialogue)"]
             TNGDB["tngdb<br/>10.1.0.249<br/>:8000 (game content API)"]
         end
@@ -52,7 +51,6 @@ graph TB
     GWAB -->|"NAT"| INET
     PLAYERS -->|":6969"| WOLA
     PLAYERS -->|":80/:443"| NGINX
-    NGINX -->|"proxy"| WOLWEB
     NGINX -->|"proxy"| ACKWEB
     NGINX -->|"proxy"| PWEB
     PLAYERS -->|":8890-8894"| ACKGW
@@ -71,7 +69,6 @@ graph TB
     style ACKGW fill:#4a9,stroke:#333,color:#000
     style VPN fill:#4a9,stroke:#333,color:#000
     style WOLA fill:#f66,stroke:#333,color:#000
-    style WOLWEB fill:#f96,stroke:#333,color:#000
     style MUDS fill:#f66,stroke:#333,color:#000
     style ACKDB fill:#96f,stroke:#333,color:#000
     style BT fill:#69f,stroke:#333,color:#000
@@ -101,7 +98,7 @@ The World of Legends game infrastructure. 19 guests (18 LXC + 1 VM) across two b
 
 Multi-environment support: prod and shared hosts live on vmbr1 (10.0.0.0/24), test hosts live on vmbr3 (10.0.1.0/24). Shared hosts (gateways, spire-db, etc.) are dual-homed on both bridges. Gateways provide NAT for both subnets but do not route between them.
 
-Key services: wol-accounts (auth API), wol-world (world data API), wol-realm (game engine), wol-ai (NPC intelligence), wol (connection interface on :6969), wol-web (ackmud.com on :5000, proxied by nginx-proxy).
+Key services: wol-accounts (auth API), wol-world (world data API), wol-realm (game engine), wol-ai (NPC intelligence), wol (connection interface on :6969), ack-web (ackmud.com and aha.ackmud.com on :5000, proxied by nginx-proxy).
 
 See: [WOL README](wol/README.md), [WOL diagrams](wol/diagrams.md), [host inventory](wol/hosts.md), [deployment guide](wol/proxmox/README.md)
 
@@ -123,7 +120,7 @@ See: [Homelab README](homelab/README.md), [homelab diagrams](homelab/diagrams.md
 
 ## ACK (vmbr2)
 
-Legacy ACK! MUD game servers on an isolated network. Five MUD servers, ack-db, ack-web, tng-ai, tngdb, and a gateway on `vmbr2` (10.1.0.0/24). The gateway provides NAT, DNS (dnsmasq), and port forwarding (external ports 8890-8894 on 192.168.1.240 map to internal :4000). ack-db (10.1.0.246) runs PostgreSQL for game world data, player records, and the help system. ack-web (10.1.0.247) serves aha.ackmud.com (Blazor WASM + API on :5000), proxied by nginx-proxy. tng-ai (10.1.0.248) provides NPC dialogue via Groq LLM API. tngdb (10.1.0.249) provides a read-only game content API.
+Legacy ACK! MUD game servers on an isolated network. Five MUD servers, ack-db, ack-web, tng-ai, tngdb, and a gateway on `vmbr2` (10.1.0.0/24). The gateway provides NAT, DNS (dnsmasq), and port forwarding (external ports 8890-8894 on 192.168.1.240 map to internal :4000). ack-db (10.1.0.246) runs PostgreSQL for game world data, player records, and the help system. ack-web (10.1.0.247) serves both `ackmud.com` and `aha.ackmud.com` from the `ack-web` repo as a frontend plus node API on :5000, proxied by nginx-proxy. tng-ai (10.1.0.248) provides NPC dialogue via Groq LLM API. tngdb (10.1.0.249) provides a read-only game content API.
 
 Completely isolated from WOL. Shared resources (present on multiple bridges): apt-cache for package caching, obs for log/metric aggregation, nginx-proxy for web traffic routing. All ACK hosts run Promtail, shipping logs to Loki (tenant: `ack`). ack-db runs postgres_exporter on :9187, scraped by Prometheus on obs.
 
@@ -192,7 +189,6 @@ Each network has its own gateway(s) for NAT and DNS. They are independent and do
 | wol-world-db-test | 10.0.1.218 | LXC (vmbr3) | PostgreSQL, test |
 | wol-realm-db-test | 10.0.1.219 | LXC (vmbr3) | PostgreSQL, test |
 | wol-a | 10.0.0.208 | LXC (dual-homed) | Connection interface (:6969) |
-| wol-web | 10.0.0.209 | LXC (single-homed) | WOL web frontend (Kestrel on :5000, proxied by nginx-proxy) |
 
 ### Homelab (vmbr0) -- 8 guests
 
@@ -219,7 +215,7 @@ Each network has its own gateway(s) for NAT and DNS. They are independent and do
 | ack41 | 10.1.0.244 | 244 | ACK! 4.1 MUD server (:8893) |
 | assault30 | 10.1.0.245 | 245 | Assault 3.0 MUD server (:8894) |
 | ack-db | 10.1.0.246 | 246 | PostgreSQL database (acktng, postgres_exporter on :9187) |
-| ack-web | 10.1.0.247 | 247 | AHA web frontend, aha.ackmud.com (Kestrel on :5000) |
+| ack-web | 10.1.0.247 | 247 | AHA web app, aha.ackmud.com (node on :5000) |
 | tng-ai | 10.1.0.248 | 248 | NPC dialogue AI (Python/FastAPI/Groq on :8000) |
 | tngdb | 10.1.0.249 | 249 | Read-only game content API (Python/FastAPI on :8000) |
 

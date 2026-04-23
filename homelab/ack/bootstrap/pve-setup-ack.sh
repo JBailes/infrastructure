@@ -17,12 +17,21 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_ACK_WEB_SRC="$(cd "$SCRIPT_DIR/../../../../web" 2>/dev/null && pwd || true)"
+DEFAULT_ACKTNG_SRC="$(cd "$SCRIPT_DIR/../../../../acktng" 2>/dev/null && pwd || true)"
+NODE_VERSION="${NODE_VERSION:-20.19.2}"
+NODE_DISTRO="node-v${NODE_VERSION}-linux-x64"
+NODE_TARBALL="${NODE_DISTRO}.tar.xz"
+NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/${NODE_TARBALL}"
 
 err()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo ""; echo "=================================================================="; echo "==> $*"; echo "=================================================================="; }
 step() { echo ""; echo "--- $*"; }
 
 [[ $EUID -eq 0 ]] || err "Run as root"
+
+ACK_WEB_SRC="${ACK_WEB_SRC:-$DEFAULT_ACK_WEB_SRC}"
+ACKTNG_SRC="${ACKTNG_SRC:-$DEFAULT_ACKTNG_SRC}"
 
 SKIP_BRIDGE=0
 [[ "${1:-}" == "--skip-bridge" ]] && SKIP_BRIDGE=1
@@ -50,7 +59,7 @@ HOSTS=(
     "assault30|245|10.1.0.245||no|4|256|1|Assault 3.0 MUD server"
     "ackfuss|250|10.1.0.250||no|4|256|1|ACK!FUSS 4.4.1 MUD server"
     "ack-db|246|10.1.0.246||no|32|1024|1|PostgreSQL database (acktng)"
-    "ack-web|247|10.1.0.247||no|8|512|1|AHA web frontend (aha.ackmud.com)"
+    "ack-web|247|10.1.0.247||no|8|512|1|ACK web frontend (ackmud.com + aha.ackmud.com)"
     "tng-ai|248|10.1.0.248||no|4|512|1|NPC dialogue AI (Python/FastAPI/Groq)"
     "tngdb|249|10.1.0.249||no|4|256|1|Read-only game content API (Python/FastAPI)"
 )
@@ -168,8 +177,84 @@ create_containers() {
 # Phase 3: Bootstrap
 # ---------------------------------------------------------------------------
 
+prepare_node_runtime() {
+    local cache_root="/tmp/ack-web-node"
+    local tarball="${cache_root}/${NODE_TARBALL}"
+    local extract_root="${cache_root}/${NODE_DISTRO}"
+
+    mkdir -p "$cache_root"
+
+    if [[ ! -f "$tarball" ]]; then
+        step "Downloading node runtime ${NODE_VERSION}" >&2
+        curl -fsSL "$NODE_URL" -o "$tarball"
+    fi
+
+    if [[ ! -x "${extract_root}/bin/node" ]]; then
+        step "Extracting node runtime ${NODE_VERSION}" >&2
+        rm -rf "$extract_root"
+        tar -xJf "$tarball" -C "$cache_root"
+    fi
+
+    printf '%s\n' "$extract_root"
+}
+
+prepare_ack_web_source() {
+    local work_root="/tmp/ack-web-stage"
+    local src_dir="${work_root}/src"
+    local runtime_dir
+
+    rm -rf "$work_root"
+    mkdir -p "$src_dir"
+
+    if [[ -n "$ACK_WEB_SRC" && -d "$ACK_WEB_SRC" ]]; then
+        step "Preparing local web checkout from $ACK_WEB_SRC" >&2
+        tar \
+            --exclude=.git \
+            --exclude=node_modules \
+            --exclude=dist \
+            -C "$ACK_WEB_SRC" \
+            -cf - . | tar -xf - -C "$src_dir"
+    else
+        step "Cloning web repo on Proxmox host" >&2
+        git clone https://github.com/ackmudhistoricalarchive/web.git "$src_dir"
+        rm -rf "$src_dir/.git"
+    fi
+
+    runtime_dir="$(prepare_node_runtime)"
+    step "Building web app on Proxmox host" >&2
+    PATH="${runtime_dir}/bin:${PATH}" "${runtime_dir}/bin/npm" --prefix "$src_dir" ci
+    PATH="${runtime_dir}/bin:${PATH}" "${runtime_dir}/bin/npm" --prefix "$src_dir" run build
+
+    printf '%s\n' "$src_dir"
+}
+
+prepare_acktng_source() {
+    local work_root="/tmp/ack-web-stage"
+    local acktng_dir="${work_root}/acktng"
+
+    rm -rf "$acktng_dir"
+
+    if [[ -n "$ACKTNG_SRC" && -d "$ACKTNG_SRC" ]]; then
+        step "Preparing local acktng checkout from $ACKTNG_SRC" >&2
+        mkdir -p "$acktng_dir"
+        tar \
+            --exclude=.git \
+            -C "$ACKTNG_SRC" \
+            -cf - . | tar -xf - -C "$acktng_dir"
+    else
+        step "Cloning acktng repo on Proxmox host" >&2
+        git clone https://github.com/ackmudhistoricalarchive/acktng.git "$acktng_dir"
+        rm -rf "$acktng_dir/.git"
+    fi
+
+    printf '%s\n' "$acktng_dir"
+}
+
 bootstrap() {
     info "Phase 3: Bootstrap ACK! hosts"
+    local web_stage_dir
+    local acktng_stage_dir
+    local node_runtime_dir
 
     # Bootstrap gateway first
     step "Bootstrapping ack-gateway (CT 240)"
@@ -205,6 +290,23 @@ bootstrap() {
 
     # Bootstrap ack-web
     step "Bootstrapping ack-web (CT 247)"
+    web_stage_dir="$(prepare_ack_web_source)"
+    acktng_stage_dir="$(prepare_acktng_source)"
+    node_runtime_dir="$(prepare_node_runtime)"
+
+    local web_archive="/tmp/ack-web-src.tgz"
+    local acktng_archive="/tmp/acktng-src.tgz"
+    local runtime_archive="/tmp/ack-web-runtime.tgz"
+
+    tar -C "$web_stage_dir" -czf "$web_archive" .
+    tar -C "$acktng_stage_dir" -czf "$acktng_archive" .
+    tar -C "$node_runtime_dir" -czf "$runtime_archive" .
+
+    pct push 247 "$web_archive" /root/ack-web-src.tgz --perms 0644
+    pct push 247 "$acktng_archive" /root/acktng-src.tgz --perms 0644
+    pct push 247 "$runtime_archive" /root/ack-web-runtime.tgz --perms 0644
+    pct exec 247 -- bash -c "rm -rf /root/ack-web-src /root/acktng-src /root/ack-web-runtime && mkdir -p /root/ack-web-src /root/acktng-src /root/ack-web-runtime && tar -xzf /root/ack-web-src.tgz -C /root/ack-web-src && tar -xzf /root/acktng-src.tgz -C /root/acktng-src && tar -xzf /root/ack-web-runtime.tgz -C /root/ack-web-runtime && rm -f /root/ack-web-src.tgz /root/acktng-src.tgz /root/ack-web-runtime.tgz"
+
     pct push 247 "$SCRIPT_DIR/04-setup-ack-web.sh" /root/04-setup-ack-web.sh --perms 0755
     pct exec 247 -- bash -c "DEBIAN_FRONTEND=noninteractive TERM=dumb /root/04-setup-ack-web.sh --configure"
 
@@ -502,7 +604,7 @@ main() {
     echo "    ackfuss   -> 192.168.1.240:8895 (10.1.0.250:4000)"
     echo ""
     echo "  Web:"
-    echo "    ack-web   -> 10.1.0.247:5000 (aha.ackmud.com, proxied by nginx-proxy)"
+    echo "    ack-web   -> 10.1.0.247:5000 (ackmud.com + aha.ackmud.com, proxied by nginx-proxy)"
     echo ""
     echo "  Services:"
     echo "    tng-ai    -> 10.1.0.248:8000 (NPC dialogue AI)"
