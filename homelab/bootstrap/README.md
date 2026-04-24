@@ -311,25 +311,26 @@ Select GPU for Wolf [1]:
 ## 11 - LLM Inference (CTID 122, 192.168.1.122, hostname `qwen122`)
 
 Privileged LXC container running llama.cpp (Vulkan) for local LLM inference
-with AMD GPU acceleration (7900XTX via `/dev/dri/card1` + `/dev/dri/renderD129`
-passthrough — Vulkan-only, no ROCm/kfd).
+with AMD GPU acceleration (7900XTX via `/dev/dri` passthrough — Vulkan-only,
+no ROCm/kfd).
 
-> **Note:** the bootstrap script file is still named `11-setup-ollama.sh`
-> for historical reasons (migration from Ollama). Its defaults still reference
-> the old CTID 103 / Qwen3.5 values — use the flags below when re-running.
+> The script's filename is still `11-setup-ollama.sh` for git history, but
+> all defaults now target the current CT 122 / Qwen3.6-27B setup. The model
+> itself is not auto-downloaded by default; either provide `--model <url>`
+> or place the GGUF at `--model-path` before running.
 
 ### Prerequisites
 
 - AMD GPU drivers (amdgpu) must be loaded on the Proxmox host
 - Mesa Vulkan drivers (RADV) on the host
+- GGUF model file available (download manually or pass `--model <url>`)
 
 ### Usage
 
 ```bash
-./11-setup-ollama.sh --ctid 122 --ctx-size 131072 \
-  --model https://huggingface.co/<repo>/resolve/main/Qwen3.6-27B-Q4_K_M.gguf \
-  --model-path /opt/models/Qwen3.6-27B-Q4_K_M.gguf     # Full bootstrap
-./11-setup-ollama.sh --ctid 122 --deploy-only          # Re-deploy config to existing CT
+./11-setup-ollama.sh                     # Defaults: CTID 122, qwen122, Qwen3.6-27B at 128k
+./11-setup-ollama.sh --deploy-only       # Re-deploy config to existing CT 122
+./11-setup-ollama.sh --ctid 124 --hostname qwen124 --model-path /opt/models/other.gguf
 ```
 
 ### Current production model
