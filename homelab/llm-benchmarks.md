@@ -1,6 +1,46 @@
 # LLM Inference Benchmarks
 
-## Environment
+## Current Production (2026-04-24)
+
+- **Hardware:** AMD Radeon RX 7900 XTX (24 GB VRAM), Proxmox LXC container (VMID 122, "qwen122")
+- **Backend:** llama.cpp (build b8876-72d693e4f), Vulkan (Mesa RADV 25.2.8, Vulkan 1.4.318)
+- **Server flags:** `--gpu-layers -1 --ctx-size 131072 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --device Vulkan0 --parallel 1 --batch-size 1024 --ubatch-size 512 --jinja --reasoning off`
+- **Host:** 192.168.1.122:8080, OpenAI-compatible API
+- **Model:** Qwen3.6-27B Q4_K_M (`Qwen3.6-27B-Q4_K_M.gguf`, 17 GB on disk, 26.90B params, native `ctx_train` = 262144)
+
+### Measured throughput (API-timed via `/v1/chat/completions`)
+
+| Workload | Prompt tokens | Prompt tok/s | Output tokens | Decode tok/s | Wall |
+|---|---:|---:|---:|---:|---:|
+| Warm decode (250-word technical essay) | 39 | 184 | 256 | **38.0** | 6.97s |
+| 8k prompt + short output | 8,027 | **691** | 4 | 48 | 11.71s |
+| ~98k prompt + needle-in-haystack recall | 97,927 | **377** | 14 | 31 | 260s |
+
+Needle-in-haystack: codeword placed at line 4,200 of a 5,500-line document (~98k tokens). Model recalled it exactly — confirms 128k context is functional end-to-end.
+
+### VRAM footprint at 128k context
+
+From server startup log (fully loaded, idle):
+
+| Buffer | Size |
+|---|---:|
+| Model weights (Vulkan0) | 16,029 MiB |
+| KV cache, q8_0 K/V | 4,352 MiB |
+| Recurrent state (Gated Delta Net) | 150 MiB |
+| Compute buffer | 495 MiB |
+| **Total** | **~21.0 GiB / 24 GiB** (~3 GiB headroom) |
+
+### GPU passthrough
+
+CT 122 only has `/dev/dri/card1` + `/dev/dri/renderD129` (the 7900XTX via `amdgpu`). No `/dev/kfd` — this is a Vulkan-only setup, no ROCm. The Intel iGPU (UHD 770) on the host stays with the host.
+
+---
+
+## Historical: 2026-04-02 benchmarks on CT 103
+
+The sections below were captured on the predecessor container (CT 103, "ollama") while surveying candidate models. They are retained for comparison but do not describe the current configuration.
+
+### Environment (historical)
 
 - **Hardware:** AMD Radeon RX 7900 XTX (24 GB VRAM), Proxmox LXC container (VMID 103, "ollama")
 - **Backend:** llama.cpp (build 95a6eba), Vulkan (RADV NAVI31)
@@ -118,9 +158,9 @@ Early tests were run with `max_tokens: 4096` due to a script bug. Both GLM and Q
 | Self-correction | No | Yes | Yes |
 | Architecture depth | Adequate | Good | Excellent |
 
-## Production Configuration
+## Production Configuration (historical — CT 103, 2026-04-02)
 
-Based on these benchmarks, the production configuration is:
+> Superseded by the current production section at the top of this document (CT 122 / Qwen3.6-27B at 128k). Retained for historical context.
 
 ```
 Model:    Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-v2 (Jackrong) Q4_K_M

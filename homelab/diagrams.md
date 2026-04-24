@@ -23,7 +23,7 @@ graph TB
             NGINX["nginx-proxy<br/>192.168.1.118 (vmbr0)<br/>10.0.0.118 (vmbr1)<br/>10.1.0.118 (vmbr2)<br/>nginx + certbot"]
             PWEB["personal-web<br/>192.168.1.117<br/>node serve :3000"]
             WOLF["wolf<br/>192.168.1.120<br/>Moonlight streaming"]
-            LLM["llm<br/>192.168.1.103<br/>llama-server :8080<br/>AMD 7900XTX (Vulkan)"]
+            LLM["qwen122<br/>192.168.1.122<br/>llama-server :8080<br/>Qwen3.6-27B @ 128k<br/>AMD 7900XTX (Vulkan)"]
         end
 
         NAS["NAS<br/>192.168.1.254<br/>NFS storage"]
@@ -95,6 +95,6 @@ graph LR
 | 192.168.1.117 | personal-web | 117 | LXC (unprivileged) | Static file server (bailes.us) on :3000 |
 | 192.168.1.118 (vmbr0), 10.0.0.118 (vmbr1), 10.1.0.118 (vmbr2) | nginx-proxy | 118 | LXC (unprivileged, tri-homed) | nginx reverse proxy + certbot TLS for all web sites |
 | 192.168.1.120 | wolf | 120 | LXC (privileged, GPU passthrough) | Wolf cloud gaming (Moonlight streaming) |
-| 192.168.1.103 | llm | 103 | LXC (privileged, AMD 7900XTX GPU) | llama.cpp (Vulkan) LLM inference, OpenAI-compatible API on :8080 |
+| 192.168.1.122 | qwen122 | 122 | LXC (privileged, AMD 7900XTX via /dev/dri only) | llama.cpp (Vulkan) serving Qwen3.6-27B Q4_K_M at 128k context, OpenAI-compatible API on :8080 |
 | 192.168.1.253 | pve | N/A | Proxmox host | Hypervisor |
 | 192.168.1.254 | nas | N/A | NAS | NFS storage for downloads |
