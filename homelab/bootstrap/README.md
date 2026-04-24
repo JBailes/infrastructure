@@ -49,7 +49,7 @@ All CTIDs are static. IPs follow the convention `X.X.X.{CTID}` on each network.
 | personal-web | 117 | 192.168.1.117 |
 | nginx-proxy | 118 | 192.168.1.118 (LAN), 10.0.0.118 (WOL), 10.1.0.118 (ACK) |
 | media-stack | 119 | 192.168.1.119 |
-| llm | 103 | 192.168.1.103 |
+| qwen122 | 122 | 192.168.1.122 |
 
 ---
 
@@ -308,33 +308,53 @@ Select GPU for Wolf [1]:
 
 ---
 
-## 11 - LLM Inference (CTID 103, 192.168.1.103)
+## 11 - LLM Inference (CTID 122, 192.168.1.122, hostname `qwen122`)
 
 Privileged LXC container running llama.cpp (Vulkan) for local LLM inference
-with AMD GPU acceleration (7900XTX via /dev/dri + /dev/kfd passthrough).
+with AMD GPU acceleration (7900XTX via `/dev/dri/card1` + `/dev/dri/renderD129`
+passthrough — Vulkan-only, no ROCm/kfd).
+
+> **Note:** the bootstrap script file is still named `11-setup-ollama.sh`
+> for historical reasons (migration from Ollama). Its defaults still reference
+> the old CTID 103 / Qwen3.5 values — use the flags below when re-running.
 
 ### Prerequisites
 
 - AMD GPU drivers (amdgpu) must be loaded on the Proxmox host
-- `/dev/kfd` must exist on the host
+- Mesa Vulkan drivers (RADV) on the host
 
 ### Usage
 
 ```bash
-./11-setup-ollama.sh                            # Defaults: CTID 103, 8 CPU, 64 GB RAM, 256 GB disk on large
-                                                #   downloads Qwen3.5-27B Opus v2 Q4_K_M
-./11-setup-ollama.sh --model <url>              # Use a different HuggingFace GGUF URL
-./11-setup-ollama.sh --no-model                 # Skip model download
-./11-setup-ollama.sh --deploy-only              # Re-deploy config to existing CT
+./11-setup-ollama.sh --ctid 122 --ctx-size 131072 \
+  --model https://huggingface.co/<repo>/resolve/main/Qwen3.6-27B-Q4_K_M.gguf \
+  --model-path /opt/models/Qwen3.6-27B-Q4_K_M.gguf     # Full bootstrap
+./11-setup-ollama.sh --ctid 122 --deploy-only          # Re-deploy config to existing CT
 ```
 
-### Default model
+### Current production model
 
-Qwen3.5-27B Claude Opus v2 distilled (Jackrong), Q4_K_M quantization. 16 GB
-on disk, fits entirely in the 7900XTX's 24 GB VRAM with 32k context window
-(~41 tok/s generation, ~721 tok/s prompt processing).
+Qwen3.6-27B Q4_K_M (~17 GB on disk, ~16 GiB VRAM), served at 128k context
+window. Native `ctx_train` is 262144, so 128k is within spec — no YaRN or
+rope scaling required.
 
-See `homelab/llm-benchmarks.md` for full benchmark results across all tested models.
+Server flags: `--gpu-layers -1 --ctx-size 131072 --flash-attn on
+--cache-type-k q8_0 --cache-type-v q8_0 --device Vulkan0 --parallel 1
+--batch-size 1024 --ubatch-size 512 --jinja --reasoning off`.
+
+VRAM footprint (measured from startup log): 16,029 MiB model + 4,352 MiB
+KV cache (q8_0 quantized) + 150 MiB recurrent state + 495 MiB compute =
+~21 GiB on a 24 GiB 7900XTX.
+
+Measured performance: ~38 tok/s decode, ~691 tok/s prompt processing at
+8k tokens, ~377 tok/s at ~98k tokens. Needle-in-haystack recall at ~98k
+tokens succeeds. See `homelab/llm-benchmarks.md` for full results.
+
+### Systemd unit
+
+`/etc/systemd/system/llama-qwen122.service` (not `llama-server.service`).
+To swap models: edit the `-m /opt/models/<name>.gguf` path in `ExecStart`,
+then `systemctl daemon-reload && systemctl restart llama-qwen122`.
 
 ### Services
 
@@ -351,12 +371,22 @@ iptables rules inside the container.
 
 ```bash
 # Test API
-curl http://192.168.1.103:8080/v1/models
+curl http://192.168.1.122:8080/v1/models
 
 # Chat (OpenAI-compatible)
-curl http://192.168.1.103:8080/v1/chat/completions \
+curl http://192.168.1.122:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model": "qwen3.5-27b-opus-v2", "messages": [{"role": "user", "content": "hello"}]}'
+  -d '{"model": "Qwen3.6-27B-Q4_K_M.gguf", "messages": [{"role": "user", "content": "hello"}]}'
+```
+
+### aimee delegate
+
+Registered as an aimee agent named `qwen122`. Dispatch via:
+
+```bash
+aimee delegate code "..."       # or: review, explain, refactor, summarize, draft, reason, search, execute
+aimee agent run code "..."      # same, lower-level form
+aimee agent test qwen122        # connectivity check
 ```
 
 ---
