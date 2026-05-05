@@ -49,7 +49,7 @@ All CTIDs are static. IPs follow the convention `X.X.X.{CTID}` on each network.
 | personal-web | 117 | 192.168.1.117 |
 | nginx-proxy | 118 | 192.168.1.118 (LAN), 10.0.0.118 (WOL), 10.1.0.118 (ACK) |
 | media-stack | 119 | 192.168.1.119 |
-| qwen122 | 122 | 192.168.1.122 |
+| qwen103 | 103 | 192.168.1.103 |
 
 ---
 
@@ -308,14 +308,14 @@ Select GPU for Wolf [1]:
 
 ---
 
-## 11 - LLM Inference (CTID 122, 192.168.1.122, hostname `qwen122`)
+## 11 - LLM Inference (CTID 103, 192.168.1.103, hostname `qwen103`)
 
 Privileged LXC container running llama.cpp (Vulkan) for local LLM inference
 with AMD GPU acceleration (7900XTX via `/dev/dri` passthrough — Vulkan-only,
 no ROCm/kfd).
 
 > The script's filename is still `11-setup-ollama.sh` for git history, but
-> all defaults now target the current CT 122 / Qwen3.6-27B setup. The model
+> all defaults now target the current CT 103 / Qwen3.6-27B setup. The model
 > itself is not auto-downloaded by default; either provide `--model <url>`
 > or place the GGUF at `--model-path` before running.
 
@@ -328,8 +328,8 @@ no ROCm/kfd).
 ### Usage
 
 ```bash
-./11-setup-ollama.sh                     # Defaults: CTID 122, qwen122, Qwen3.6-27B at 128k
-./11-setup-ollama.sh --deploy-only       # Re-deploy config to existing CT 122
+./11-setup-ollama.sh                     # Defaults: CTID 103, qwen103, Qwen3.6-27B at 128k
+./11-setup-ollama.sh --deploy-only       # Re-deploy config to existing CT 103
 ./11-setup-ollama.sh --ctid 124 --hostname qwen124 --model-path /opt/models/other.gguf
 ```
 
@@ -353,9 +353,9 @@ tokens succeeds. See `homelab/llm-benchmarks.md` for full results.
 
 ### Systemd unit
 
-`/etc/systemd/system/llama-qwen122.service` (not `llama-server.service`).
+`/etc/systemd/system/llama-qwen103.service` (not `llama-server.service`).
 To swap models: edit the `-m /opt/models/<name>.gguf` path in `ExecStart`,
-then `systemctl daemon-reload && systemctl restart llama-qwen122`.
+then `systemctl daemon-reload && systemctl restart llama-qwen103`.
 
 ### Services
 
@@ -372,22 +372,22 @@ iptables rules inside the container.
 
 ```bash
 # Test API
-curl http://192.168.1.122:8080/v1/models
+curl http://192.168.1.103:8080/v1/models
 
 # Chat (OpenAI-compatible)
-curl http://192.168.1.122:8080/v1/chat/completions \
+curl http://192.168.1.103:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "Qwen3.6-27B-Q4_K_M.gguf", "messages": [{"role": "user", "content": "hello"}]}'
 ```
 
 ### aimee delegate
 
-Registered as an aimee agent named `qwen122`. Dispatch via:
+Registered as an aimee agent named `qwen103`. Dispatch via:
 
 ```bash
 aimee delegate code "..."       # or: review, explain, refactor, summarize, draft, reason, search, execute
 aimee agent run code "..."      # same, lower-level form
-aimee agent test qwen122        # connectivity check
+aimee agent test qwen103        # connectivity check
 ```
 
 ---

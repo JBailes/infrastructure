@@ -5,7 +5,7 @@
 # backend (no ROCm / no /dev/kfd required) for ~47% higher decode throughput
 # on AMD GPUs. Filename kept for git history.
 #
-# Current production target: CT 122 "qwen122", 192.168.1.122, serving
+# Current production target: CT 103 "qwen103", 192.168.1.103, serving
 # Qwen3.6-27B Q4_K_M at 128k context on the AMD 7900XTX via Vulkan.
 # See homelab/llm-benchmarks.md for full benchmark results.
 #

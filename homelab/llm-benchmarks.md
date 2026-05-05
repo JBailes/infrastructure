@@ -2,10 +2,10 @@
 
 ## Current Production (2026-04-24)
 
-- **Hardware:** AMD Radeon RX 7900 XTX (24 GB VRAM), Proxmox LXC container (VMID 122, "qwen122")
+- **Hardware:** AMD Radeon RX 7900 XTX (24 GB VRAM), Proxmox LXC container (VMID 103, "qwen103")
 - **Backend:** llama.cpp (build b8876-72d693e4f), Vulkan (Mesa RADV 25.2.8, Vulkan 1.4.318)
 - **Server flags:** `--gpu-layers -1 --ctx-size 131072 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --device Vulkan0 --parallel 1 --batch-size 1024 --ubatch-size 512 --jinja --reasoning off`
-- **Host:** 192.168.1.122:8080, OpenAI-compatible API
+- **Host:** 192.168.1.103:8080, OpenAI-compatible API
 - **Model:** Qwen3.6-27B Q4_K_M (`Qwen3.6-27B-Q4_K_M.gguf`, 17 GB on disk, 26.90B params, native `ctx_train` = 262144)
 
 ### Measured throughput (API-timed via `/v1/chat/completions`)
@@ -32,7 +32,7 @@ From server startup log (fully loaded, idle):
 
 ### GPU passthrough
 
-CT 122 only has `/dev/dri/card1` + `/dev/dri/renderD129` (the 7900XTX via `amdgpu`). No `/dev/kfd` — this is a Vulkan-only setup, no ROCm. The Intel iGPU (UHD 770) on the host stays with the host.
+CT 103 only has `/dev/dri/card1` + `/dev/dri/renderD129` (the 7900XTX via `amdgpu`). No `/dev/kfd` — this is a Vulkan-only setup, no ROCm. The Intel iGPU (UHD 770) on the host stays with the host.
 
 ---
 
@@ -160,7 +160,7 @@ Early tests were run with `max_tokens: 4096` due to a script bug. Both GLM and Q
 
 ## Production Configuration (historical — CT 103, 2026-04-02)
 
-> Superseded by the current production section at the top of this document (CT 122 / Qwen3.6-27B at 128k). Retained for historical context.
+> Superseded by the current production section at the top of this document (CT 103 / Qwen3.6-27B at 128k). Retained for historical context.
 
 ```
 Model:    Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-v2 (Jackrong) Q4_K_M

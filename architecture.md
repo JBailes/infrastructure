@@ -114,7 +114,7 @@ General-purpose services on the home LAN, independent of WOL.
 - **deploy** (192.168.1.101) -- quad-homed deployment container. GitHub Actions SSHs in on :2222 to build and deploy artifacts across all networks. Key-only auth, GitHub IP allowlist.
 - **personal-web** (192.168.1.117) -- static file server (node serve on :3000) for bailes.us.
 - **wolf** (192.168.1.120) -- Wolf cloud gaming for Moonlight-compatible game streaming. Privileged LXC with GPU passthrough.
-- **ollama** (192.168.1.103) -- Ollama LLM inference server with AMD 7900XTX GPU acceleration. OpenAI-compatible API on :11434.
+- **qwen103** (192.168.1.103) -- llama.cpp (Vulkan) LLM inference with AMD 7900XTX. Qwen3.6-27B Q4_K_M at 128k context. OpenAI-compatible API on :8080.
 
 See: [Homelab README](homelab/README.md), [homelab diagrams](homelab/diagrams.md), [bootstrap guide](homelab/bootstrap/README.md)
 
@@ -202,7 +202,7 @@ Each network has its own gateway(s) for NAT and DNS. They are independent and do
 | nginx-proxy | 192.168.1.118 | 118 | LXC (tri-homed) | nginx reverse proxy + certbot TLS for all web sites |
 | deploy | 192.168.1.101 | 101 | LXC (quad-homed) | GitHub Actions deployment (SSH :2222, builds + deploys) |
 | wolf | 192.168.1.120 | 120 | LXC (privileged) | Wolf cloud gaming (Moonlight streaming) |
-| ollama | 192.168.1.103 | 103 | LXC (privileged) | Ollama LLM inference, AMD 7900XTX GPU (:11434) |
+| qwen103 | 192.168.1.103 | 103 | LXC (privileged) | llama.cpp (Vulkan) LLM inference, AMD 7900XTX GPU (:8080) |
 
 ### ACK (vmbr2) -- 10 guests
 
