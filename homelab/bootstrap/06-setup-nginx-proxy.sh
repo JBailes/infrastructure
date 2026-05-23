@@ -16,6 +16,7 @@
 # Central nginx reverse proxy for all web sites. Handles TLS termination
 # via certbot and routes by Host header to the appropriate backend:
 #   ackmud.com      -> ack-web (10.1.0.247:5000) + stream for WSS ports
+#   aha.ackmud.com  -> redirect to ackmud.com
 #   bailes.us       -> personal-web (192.168.1.117:3000)
 
 set -euo pipefail
@@ -89,6 +90,7 @@ ACK:  $ACK_IP (eth2, vmbr2) -- reach ack-web (10.1.0.247:5000)
 
 Routing:
   ackmud.com      -> http://10.1.0.247:5000 (ack-web)
+  aha.ackmud.com  -> https://ackmud.com
   bailes.us       -> http://192.168.1.117:3000 (personal-web)
   WSS :18890      -> 10.1.0.247:18890
   WSS :8891       -> 10.1.0.247:8891
@@ -215,6 +217,14 @@ server {
 }
 NGINX
 
+    cat > /etc/nginx/sites-available/aha.ackmud.com <<'NGINX'
+server {
+    listen 80;
+    server_name aha.ackmud.com;
+    return 301 https://ackmud.com$request_uri;
+}
+NGINX
+
     cat > /etc/nginx/sites-available/bailes.us <<'NGINX'
 server {
     listen 80;
@@ -249,10 +259,9 @@ NGINX
 
     # Enable sites
     rm -f /etc/nginx/sites-enabled/default
-    rm -f /etc/nginx/sites-enabled/aha.ackmud.com
-    rm -f /etc/nginx/sites-available/aha.ackmud.com
     ln -sf /etc/nginx/sites-available/default-health /etc/nginx/sites-enabled/
     ln -sf /etc/nginx/sites-available/ackmud.com /etc/nginx/sites-enabled/
+    ln -sf /etc/nginx/sites-available/aha.ackmud.com /etc/nginx/sites-enabled/
     ln -sf /etc/nginx/sites-available/bailes.us /etc/nginx/sites-enabled/
 
     # Stream blocks for legacy MUD WebSocket proxying
@@ -366,7 +375,7 @@ obtain_certificates() {
     if certbot --nginx --non-interactive --agree-tos \
         --email "$CERTBOT_EMAIL" \
         --keep-until-expiring \
-        -d ackmud.com -d www.ackmud.com; then
+        -d ackmud.com -d www.ackmud.com -d aha.ackmud.com; then
         info "Certificate obtained for ackmud.com"
     else
         echo "WARNING: certbot failed for ackmud.com (DNS may not be pointed yet)" >&2
@@ -395,7 +404,7 @@ obtain_certificates() {
 One or more certbot requests failed. This is expected if DNS is
 not yet pointed at $LAN_IP. Once DNS is live, re-run:
 
-  certbot --nginx -d ackmud.com -d www.ackmud.com
+  certbot --nginx -d ackmud.com -d www.ackmud.com -d aha.ackmud.com
   certbot --nginx -d bailes.us -d www.bailes.us
 
 Or re-run this script with --deploy-only.
