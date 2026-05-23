@@ -11,7 +11,7 @@
 #   - Outbound port filtering (80, 443, 53 only)
 #
 # Port mapping:
-#   8890 -> 10.1.0.241:4000 (acktng)
+#   8890 -> 10.1.0.241:8890 (acktng)
 #   8891 -> 10.1.0.242:4000 (ack431)
 #   8892 -> 10.1.0.243:4000 (ack42)
 #   8893 -> 10.1.0.244:4000 (ack41)
@@ -74,6 +74,7 @@ setup_nat() {
     iptables -A FORWARD -i "$INTERNAL_IF" -o "$EXTERNAL_IF" -m state --state ESTABLISHED,RELATED -j ACCEPT
 
     # Allow forwarded game traffic (port forwarding, new connections after DNAT)
+    iptables -A FORWARD -i "$EXTERNAL_IF" -o "$INTERNAL_IF" -p tcp -d 10.1.0.241 --dport 8890 -j ACCEPT
     iptables -A FORWARD -i "$EXTERNAL_IF" -o "$INTERNAL_IF" -p tcp --dport 4000 -j ACCEPT
 
     # Drop everything else
@@ -96,10 +97,10 @@ setup_port_forwarding() {
     info "Configuring port forwarding for MUD servers"
 
     # Port -> MUD server mapping
-    # External port 8890-8894 on the gateway's external IP
-    # forwarded to port 4000 on each MUD server's internal IP
+    # External port 8890 on the gateway's external IP forwards to ACK!TNG
+    # on port 8890. Legacy MUDs forward to port 4000.
 
-    iptables -t nat -A PREROUTING -i "$EXTERNAL_IF" -p tcp --dport 8890 -j DNAT --to-destination 10.1.0.241:4000
+    iptables -t nat -A PREROUTING -i "$EXTERNAL_IF" -p tcp --dport 8890 -j DNAT --to-destination 10.1.0.241:8890
     iptables -t nat -A PREROUTING -i "$EXTERNAL_IF" -p tcp --dport 8891 -j DNAT --to-destination 10.1.0.242:4000
     iptables -t nat -A PREROUTING -i "$EXTERNAL_IF" -p tcp --dport 8892 -j DNAT --to-destination 10.1.0.243:4000
     iptables -t nat -A PREROUTING -i "$EXTERNAL_IF" -p tcp --dport 8893 -j DNAT --to-destination 10.1.0.244:4000
@@ -107,7 +108,7 @@ setup_port_forwarding() {
     iptables -t nat -A PREROUTING -i "$EXTERNAL_IF" -p tcp --dport 8895 -j DNAT --to-destination 10.1.0.250:4000
 
     info "Port forwarding configured"
-    info "  8890 -> 10.1.0.241:4000 (acktng)"
+    info "  8890 -> 10.1.0.241:8890 (acktng)"
     info "  8891 -> 10.1.0.242:4000 (ack431)"
     info "  8892 -> 10.1.0.243:4000 (ack42)"
     info "  8893 -> 10.1.0.244:4000 (ack41)"
@@ -195,10 +196,10 @@ ACK! gateway setup complete ($INTERNAL_IP).
 
 NAT:   Active (ACK! hosts can reach internet)
 DNS:   dnsmasq on $INTERNAL_IP:53
-Ports: 8890-8895 forwarded to MUD servers on :4000
+Ports: 8890-8895 forwarded to MUD servers
 
 Game server mapping:
-  8890 -> 10.1.0.241:4000 (acktng)
+  8890 -> 10.1.0.241:8890 (acktng)
   8891 -> 10.1.0.242:4000 (ack431)
   8892 -> 10.1.0.243:4000 (ack42)
   8893 -> 10.1.0.244:4000 (ack41)
