@@ -21,7 +21,7 @@ This creates the bridge, all containers, bootstraps the gateway and MUD servers,
 | 244 | ack41 | 10.1.0.244 | ACK! 4.1 MUD server |
 | 245 | assault30 | 10.1.0.245 | Assault 3.0 MUD server |
 | 246 | ack-db | 10.1.0.246 | PostgreSQL database (acktng) |
-| 247 | ack-web | 10.1.0.247 | ACK web app (ackmud.com + aha.ackmud.com) |
+| 247 | ack-web | 10.1.0.247 | ACK web app (ackmud.com) |
 | 248 | tng-ai | 10.1.0.248 | NPC dialogue AI (Python/FastAPI/Groq) |
 | 249 | tngdb | 10.1.0.249 | Read-only game content API (Python/FastAPI) |
 
@@ -51,9 +51,9 @@ All ACK hosts run Promtail, shipping logs to obs at 10.1.0.100:3100 (Loki tenant
 
 Logs are viewable in Grafana (http://192.168.1.100) under the **Loki (ACK)** datasource with query `{host!=""}`.
 
-## ACK Websites (`aha.ackmud.com`, `ackmud.com`)
+## ACK Website (`ackmud.com`)
 
-The ACK web host runs on ack-web (CT 247, 10.1.0.247). It serves both `aha.ackmud.com` and `ackmud.com` from the `ackmudhistoricalarchive/web` repo on port 5000. TLS termination is handled by nginx-proxy (10.1.0.118 on the ACK network, 192.168.1.118 on the LAN).
+The ACK web host runs on ack-web (CT 247, 10.1.0.247). It serves `ackmud.com` from the `ackmudhistoricalarchive/web` repo on port 5000. TLS termination is handled by nginx-proxy (10.1.0.118 on the ACK network, 192.168.1.118 on the LAN). The old `aha.ackmud.com` subdomain is no longer routed.
 
 The app preserves the legacy ACK web surface: `/api/who`, `/api/gsgp`, and `/api/reference/*`, backed by the live ACKTNG game host (`10.1.0.241:8080`) and a local clone of the `acktng` data tree for help, shelp, and lore files.
 

@@ -64,7 +64,7 @@ graph TB
         end
 
         subgraph WEBHOST["WOL Web Frontend (Single-Homed)"]
-            WEB["wol-web<br/>10.0.0.209<br/>:5000 (Kestrel)<br/>ackmud.com"]
+            WEB["wol-web<br/>10.0.0.209<br/>:5000 (Kestrel)<br/>retired frontend"]
         end
 
         subgraph OBS["Observability (Tri-Homed, Homelab-Managed)"]
@@ -786,7 +786,7 @@ graph LR
 | 10.0.0.206 | 10.0.1.206 | wol-accounts-db | PostgreSQL (wol-accounts) |
 | 10.0.0.207 | 10.0.1.207 | wol-accounts | Accounts API (C#/.NET) |
 | 10.0.0.208 | 10.0.1.208 | wol-a | Connection interface (.NET, also ext-homed) |
-| 10.0.0.209 | 10.0.1.209 | wol-web | Web frontend: ackmud.com (.NET Kestrel) |
+| 10.0.0.209 | 10.0.1.209 | wol-web | Retired web frontend (.NET Kestrel) |
 | 10.0.0.100 | -- | obs | Observability (Loki, Prometheus, Grafana; tri-homed, homelab) |
 | 10.0.0.115 | -- | apt-cache | apt-cacher-ng package cache (tri-homed, homelab) |
 

@@ -41,7 +41,7 @@ WOL runs on a single Proxmox VE host (192.168.1.253) with 13 guests (12 LXC cont
 | 10.0.0.202 | 10.0.1.202 | spire-db | LXC | PostgreSQL (SPIRE datastore) + Tang (NBDE) |
 | 10.0.0.100 | - | obs | LXC | Observability: Loki, Prometheus, Alertmanager, Grafana (dual-homed) |
 | 10.0.0.208 | 10.0.1.208 | wol-a | LXC | Connection interface (C#/.NET, dual-homed, port 6969) |
-| 10.0.0.209 | 10.0.1.209 | wol-web | LXC | WOL web frontend: ackmud.com (Kestrel on :5000, single-homed) |
+| 10.0.0.209 | 10.0.1.209 | wol-web | LXC | Retired WOL web frontend (Kestrel on :5000, no public hostname) |
 | 10.0.0.115 | - | apt-cache | LXC | apt-cacher-ng package cache (tri-homed, managed by homelab) |
 
 **Prod environment (CTIDs 210-214, vmbr1 only):**
@@ -70,7 +70,7 @@ WOL runs on a single Proxmox VE host (192.168.1.253) with 13 guests (12 LXC cont
 - **Test bridge (vmbr3, 10.0.1.0/24):** Test hosts and shared infrastructure. Test-only hosts (CTIDs 215-219) have a single interface on vmbr3.
 - **Shared hosts (CTIDs 200-209):** Dual-homed on both vmbr1 and vmbr3, reachable from both subnets. Gateways provide NAT for both subnets but do NOT route between them. Cross-environment isolation is enforced by bridge membership.
 - **External network (192.168.0.0/23):** Operator access and external service integration. Only externally-homed hosts (gateways, wol-a, obs, apt-cache) have external interfaces.
-- **Externally-homed hosts:** wol-gateway-a/b (NAT), wol-a (game traffic on :6969), obs (Grafana on :80, Loki/Prometheus ingestion from external services), apt-cache (Squid forward proxy on :3128). wol-web is single-homed; TLS termination is handled by nginx-proxy (homelab).
+- **Externally-homed hosts:** wol-gateway-a/b (NAT), wol-a (game traffic on :6969), obs (Grafana on :80, Loki/Prometheus ingestion from external services), apt-cache (Squid forward proxy on :3128). wol-web is single-homed and has no public hostname routed through nginx-proxy.
 
 ### Security Architecture
 

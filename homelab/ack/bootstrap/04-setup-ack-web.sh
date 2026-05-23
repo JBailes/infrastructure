@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 04-setup-ack-web.sh -- Bootstrap ack-web (ackmud.com + aha.ackmud.com) on the ACK network
+# 04-setup-ack-web.sh -- Bootstrap ack-web (ackmud.com) on the ACK network
 #
 # Runs on: ack-web (10.1.0.247) -- Debian 13 LXC (unprivileged, single-homed)
 # CTID: 247
@@ -48,7 +48,7 @@ configure() {
 ack-web is ready (single-homed on ACK network).
 
 IP:     10.1.0.247 (eth0, vmbr2)
-Sites:  ackmud.com + aha.ackmud.com
+Sites:  ackmud.com
 App:    node server on :5000 (frontend + API, no TLS on host)
 Health: GET /health on :5000
 TLS:    handled by nginx-proxy (10.1.0.118)

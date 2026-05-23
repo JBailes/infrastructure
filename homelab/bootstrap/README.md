@@ -199,7 +199,6 @@ Tri-homed LXC container running nginx as a central reverse proxy for all web
 sites. Handles TLS termination via certbot and routes by Host header:
 
 - **ackmud.com** -> ack-web (10.1.0.247:5000) via ACK network
-- **aha.ackmud.com** -> ack-web (10.1.0.247:5000) via ACK network
 - **bailes.us** -> personal-web (192.168.1.117:3000) via LAN
 
 Also proxies legacy MUD WebSocket traffic (ports 18890, 8891, 8892) to ack-web
