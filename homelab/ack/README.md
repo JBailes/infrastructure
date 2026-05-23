@@ -53,7 +53,7 @@ Logs are viewable in Grafana (http://192.168.1.100) under the **Loki (ACK)** dat
 
 ## ACK Website (`ackmud.com`)
 
-The ACK web host runs on ack-web (CT 247, 10.1.0.247). It serves `ackmud.com` from the `ackmudhistoricalarchive/web` repo on port 5000. TLS termination is handled by nginx-proxy (10.1.0.118 on the ACK network, 192.168.1.118 on the LAN). The old `aha.ackmud.com` subdomain is no longer routed.
+The ACK web host runs on ack-web (CT 247, 10.1.0.247). It serves `ackmud.com` from the `ackmudhistoricalarchive/web` repo on port 5000. TLS termination is handled by nginx-proxy (10.1.0.118 on the ACK network, 192.168.1.118 on the LAN). The old `aha.ackmud.com` subdomain redirects to `ackmud.com`.
 
 The app preserves the legacy ACK web surface: `/api/who`, `/api/gsgp`, and `/api/reference/*`, backed by the live ACKTNG game host (`10.1.0.241:8080`) and a local clone of the `acktng` data tree for help, shelp, and lore files.
 
