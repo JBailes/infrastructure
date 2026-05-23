@@ -23,7 +23,7 @@ graph TB
         ACKDB["ack-db<br/>10.1.0.246<br/>:5432 (PostgreSQL)"]
 
         subgraph MUDS["MUD Servers"]
-            TNG["acktng<br/>10.1.0.241<br/>:4000"]
+            TNG["acktng<br/>10.1.0.241<br/>:8890"]
             V431["ack431<br/>10.1.0.242<br/>:4000"]
             V42["ack42<br/>10.1.0.243<br/>:4000"]
             V41["ack41<br/>10.1.0.244<br/>:4000"]
@@ -47,7 +47,7 @@ graph TB
     PLAYERS -->|":8893"| GW
     PLAYERS -->|":8894"| GW
 
-    GW -->|"DNAT :8890 -> :4000"| TNG
+    GW -->|"DNAT :8890 -> :8890"| TNG
     GW -->|"DNAT :8891 -> :4000"| V431
     GW -->|"DNAT :8892 -> :4000"| V42
     GW -->|"DNAT :8893 -> :4000"| V41
@@ -100,7 +100,7 @@ graph TB
 
 ```mermaid
 graph LR
-    C1["Client :8890"] -->|DNAT| TNG["acktng<br/>10.1.0.241:4000"]
+    C1["Client :8890"] -->|DNAT| TNG["acktng<br/>10.1.0.241:8890"]
     C2["Client :8891"] -->|DNAT| V431["ack431<br/>10.1.0.242:4000"]
     C3["Client :8892"] -->|DNAT| V42["ack42<br/>10.1.0.243:4000"]
     C4["Client :8893"] -->|DNAT| V41["ack41<br/>10.1.0.244:4000"]

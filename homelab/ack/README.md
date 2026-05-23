@@ -63,7 +63,7 @@ All MUD servers run under systemd (`mud.service`), created by the bootstrap. The
 
 | Host | Service | Unit | Port |
 |------|---------|------|------|
-| acktng (CT 241) | ACK!TNG MUD | mud.service | :4000 |
+| acktng (CT 241) | ACK!TNG MUD | mud.service | :8890 |
 | ack431 (CT 242) | ACK! 4.3.1 MUD | mud.service | :4000 |
 | ack42 (CT 243) | ACK! 4.2 MUD | mud.service | :4000 |
 | ack41 (CT 244) | ACK! 4.1 MUD | mud.service | :4000 |

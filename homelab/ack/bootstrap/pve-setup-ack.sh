@@ -271,7 +271,7 @@ bootstrap() {
 
     # Bootstrap MUD servers: name|ctid|ip|port|repo
     local mud_hosts=(
-        "acktng|241|10.1.0.241|4000|https://github.com/ackmudhistoricalarchive/acktng.git"
+        "acktng|241|10.1.0.241|8890|https://github.com/ackmudhistoricalarchive/acktng.git"
         "ack431|242|10.1.0.242|4000|https://github.com/ackmudhistoricalarchive/ackmud431.git"
         "ack42|243|10.1.0.243|4000|https://github.com/ackmudhistoricalarchive/ackmud42.git"
         "ack41|244|10.1.0.244|4000|https://github.com/ackmudhistoricalarchive/ackmud41.git"
@@ -517,14 +517,14 @@ verify_services() {
 
     local all_ok=1
 
-    # MUD servers: check TCP on :4000
-    local mud_hosts=("acktng|241|10.1.0.241" "ack431|242|10.1.0.242" "ack42|243|10.1.0.243" "ack41|244|10.1.0.244" "assault30|245|10.1.0.245" "ackfuss|250|10.1.0.250")
+    # MUD servers: check TCP on the configured game port.
+    local mud_hosts=("acktng|241|10.1.0.241|8890" "ack431|242|10.1.0.242|4000" "ack42|243|10.1.0.243|4000" "ack41|244|10.1.0.244|4000" "assault30|245|10.1.0.245|4000" "ackfuss|250|10.1.0.250|4000")
     for entry in "${mud_hosts[@]}"; do
-        IFS='|' read -r name ctid ip <<< "$entry"
-        if timeout 3 bash -c "echo >/dev/tcp/$ip/4000" 2>/dev/null; then
-            step "OK: $name (CT $ctid) listening on :4000"
+        IFS='|' read -r name ctid ip port <<< "$entry"
+        if timeout 3 bash -c "echo >/dev/tcp/$ip/$port" 2>/dev/null; then
+            step "OK: $name (CT $ctid) listening on :$port"
         else
-            step "FAIL: $name (CT $ctid) not responding on :4000"
+            step "FAIL: $name (CT $ctid) not responding on :$port"
             all_ok=0
         fi
     done
@@ -596,7 +596,7 @@ main() {
     echo "    ack-db    -> 10.1.0.246:5432 (PostgreSQL, acktng database)"
     echo ""
     echo "  Game servers:"
-    echo "    acktng    -> 192.168.1.240:8890 (10.1.0.241:4000)"
+    echo "    acktng    -> 192.168.1.240:8890 (10.1.0.241:8890)"
     echo "    ack431    -> 192.168.1.240:8891 (10.1.0.242:4000)"
     echo "    ack42     -> 192.168.1.240:8892 (10.1.0.243:4000)"
     echo "    ack41     -> 192.168.1.240:8893 (10.1.0.244:4000)"

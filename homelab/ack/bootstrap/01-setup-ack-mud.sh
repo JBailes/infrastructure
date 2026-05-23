@@ -193,7 +193,7 @@ setup_systemd() {
     if [[ "$MUD_NAME" == "acktng" ]]; then
         # acktng uses its own startup script which handles building,
         # TLS detection, and multi-port launch. Override ports via env vars:
-        # PORT=4000 (game), TLS/WSS/WS disabled (no certs on ACK network).
+        # PORT=$MUD_PORT (game), TLS/WSS/WS disabled (no certs on ACK network).
         cat > /etc/systemd/system/mud.service <<UNIT
 [Unit]
 Description=ACK!TNG MUD server
