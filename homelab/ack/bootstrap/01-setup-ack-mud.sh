@@ -104,8 +104,11 @@ configure_firewall() {
     # Game port from ACK! network (gateway forwards external traffic here)
     ufw allow from "$ACK_NET" to any port "$MUD_PORT" proto tcp
 
+    # Game HTTP API for ack-web (/who and /gsgp)
+    ufw allow from "$ACK_NET" to any port 8080 proto tcp
+
     ufw --force enable
-    info "Firewall enabled (SSH + game port $MUD_PORT)"
+    info "Firewall enabled (SSH + game port $MUD_PORT + HTTP API 8080)"
 }
 
 # ---------------------------------------------------------------------------

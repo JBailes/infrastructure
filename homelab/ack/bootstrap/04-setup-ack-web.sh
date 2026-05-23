@@ -235,6 +235,7 @@ WorkingDirectory=/opt/ack-web
 Environment=PORT=5000
 Environment=ACKTNG_DIR=/opt/acktng
 Environment=ACKTNG_GAME_URL=http://10.1.0.241:8080
+Environment=TNGDB_API_URL=http://10.1.0.249:8000
 ExecStart=${node_exec} /opt/ack-web/server/app-server.js
 Restart=always
 RestartSec=5
