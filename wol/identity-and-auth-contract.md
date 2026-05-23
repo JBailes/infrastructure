@@ -112,7 +112,7 @@ The HMAC bearer secret scheme from the private-ca proposal is fully retired. No 
 
 ### Non-SPIRE Callers
 
-The `wol-web` host (ackmud.com frontend) serves only static Blazor WASM files and does not call any WOL API services. It does not run a SPIRE Agent and has no workload identity. The `ack-web` host (aha.ackmud.com) is on the ACK network and also does not call WOL API services.
+The `wol-web` host is a retired frontend with no public hostname. It does not run a SPIRE Agent and has no workload identity. The `ack-web` host (ackmud.com) is on the ACK network and also does not call WOL API services.
 
 ## Authorization Matrix
 

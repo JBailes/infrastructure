@@ -14,7 +14,7 @@ All homelab CTIDs are static and follow the convention `192.168.1.<CTID>` for IP
 | obs | 192.168.1.100 (vmbr0), 10.0.0.100 (vmbr1), 10.1.0.100 (vmbr2) | 215 | LXC | Loki + Prometheus + Grafana + Alertmanager. Tri-homed: collects logs and metrics from all networks. |
 | vpn-gateway | 192.168.1.104 | 104 | VM | OpenVPN gateway with kill switch. Any device that routes through it gets VPN protection. |
 | bittorrent | 192.168.1.116 | 116 | LXC | qBittorrent-nox with triple-layer VPN enforcement. Downloads to NAS via NFS. |
-| nginx-proxy | 192.168.1.118 (vmbr0), 10.0.0.118 (vmbr1), 10.1.0.118 (vmbr2) | 118 | LXC | nginx reverse proxy + certbot TLS. Tri-homed: routes ackmud.com, aha.ackmud.com, bailes.us to backends. |
+| nginx-proxy | 192.168.1.118 (vmbr0), 10.0.0.118 (vmbr1), 10.1.0.118 (vmbr2) | 118 | LXC | nginx reverse proxy + certbot TLS. Tri-homed: routes ackmud.com and bailes.us to backends. |
 | personal-web | 192.168.1.117 | 117 | LXC | Static file server (node serve on :3000) for bailes.us. |
 | wolf | 192.168.1.120 | 120 | LXC | Wolf cloud gaming (Moonlight streaming). Privileged, GPU passthrough. |
 | qwen103 | 192.168.1.103 | 103 | LXC | llama.cpp (Vulkan) LLM inference with AMD 7900XTX. Default model Qwen3.6-27B Q4_K_M at 128k context. OpenAI-compatible API on :8080. |

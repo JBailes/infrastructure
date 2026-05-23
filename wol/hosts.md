@@ -30,7 +30,7 @@ so prod hosts cannot communicate with test hosts and vice versa. No VLANs are us
 | `spire-db` | `10.0.0.202` + `10.0.1.202` | LXC (dual-bridge) | PostgreSQL 17 (SPIRE) + Tang server (NBDE) |
 | `obs` | `10.0.0.100` (int), `192.168.1.100` (ext), `10.1.0.100` (ACK) | LXC (tri-homed, managed by homelab) | Loki + Prometheus + Grafana + Alertmanager |
 | `wol-a` | `10.0.0.208` + `10.0.1.208` (int), `192.168.1.208` (ext) | LXC (privileged, dual-bridge + ext) | WOL connection interface (stateless, autoscalable) + SPIRE Agent |
-| `wol-web` | `10.0.0.209` + `10.0.1.209` (int) | LXC (dual-bridge) | WOL web frontend: ackmud.com (.NET Kestrel on :5000, no nginx/TLS) |
+| `wol-web` | `10.0.0.209` + `10.0.1.209` (int) | LXC (dual-bridge) | Retired WOL web frontend (.NET Kestrel on :5000, no public hostname) |
 
 ## Prod Environment (vmbr1, 10.0.0.0/24)
 
@@ -91,7 +91,7 @@ so prod hosts cannot communicate with test hosts and vice versa. No VLANs are us
 | `spire-db`, `wol-accounts-db`, `wol-world-db-{prod,test}` | `9187` | `obs` | postgres_exporter (Prometheus metrics) |
 | `wol-ai-{prod,test}` | `8443` | Same-env `wol-realm` | AI API (mTLS) |
 | `wol-a` | `6969` | Internet (external) | Game clients (telnet, TLS telnet, WS, WSS) |
-| `wol-web` | `5000` | Private network | Kestrel app server (ackmud.com, proxied by nginx-proxy) |
+| `wol-web` | `5000` | Private network | Retired Kestrel app server (not proxied publicly) |
 
 ## Bootstrap Order
 
@@ -131,7 +131,7 @@ Bootstrap scripts are organized as:
 | `prod/16-setup-wol-ai-prod.sh` | .NET runtime, AI service (prod) | `wol-ai-prod` |
 | `test/16-setup-wol-ai-test.sh` | .NET runtime, AI service (test) | `wol-ai-test` |
 | _(homelab: 03-setup-obs.sh)_ | Loki + Prometheus + Grafana + Alertmanager (managed by homelab) | `obs` |
-| `18-setup-wol-web.sh` | .NET Kestrel app server (WOL web frontend, no nginx/TLS) | `wol-web` |
+| `18-setup-wol-web.sh` | Retired .NET Kestrel app server (no public hostname) | `wol-web` |
 | `19-setup-promtail.sh` | Promtail log shipper | all service hosts |
 | `enroll-host-certs.sh` | Automated cert enrollment (DB server certs, Promtail client certs) | all hosts needing certs |
 | _(homelab: 09-setup-proxmox-obs.sh)_ | Proxmox host observability (pve-exporter, promtail) | Proxmox host |

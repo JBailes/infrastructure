@@ -59,7 +59,7 @@ HOSTS=(
     "assault30|245|10.1.0.245||no|4|256|1|Assault 3.0 MUD server"
     "ackfuss|250|10.1.0.250||no|4|256|1|ACK!FUSS 4.4.1 MUD server"
     "ack-db|246|10.1.0.246||no|32|1024|1|PostgreSQL database (acktng)"
-    "ack-web|247|10.1.0.247||no|8|512|1|ACK web frontend (ackmud.com + aha.ackmud.com)"
+    "ack-web|247|10.1.0.247||no|8|512|1|ACK web frontend (ackmud.com)"
     "tng-ai|248|10.1.0.248||no|4|512|1|NPC dialogue AI (Python/FastAPI/Groq)"
     "tngdb|249|10.1.0.249||no|4|256|1|Read-only game content API (Python/FastAPI)"
 )
@@ -604,7 +604,7 @@ main() {
     echo "    ackfuss   -> 192.168.1.240:8895 (10.1.0.250:4000)"
     echo ""
     echo "  Web:"
-    echo "    ack-web   -> 10.1.0.247:5000 (ackmud.com + aha.ackmud.com, proxied by nginx-proxy)"
+    echo "    ack-web   -> 10.1.0.247:5000 (ackmud.com, proxied by nginx-proxy)"
     echo ""
     echo "  Services:"
     echo "    tng-ai    -> 10.1.0.248:8000 (NPC dialogue AI)"

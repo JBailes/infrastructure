@@ -15,8 +15,7 @@
 #
 # Central nginx reverse proxy for all web sites. Handles TLS termination
 # via certbot and routes by Host header to the appropriate backend:
-#   ackmud.com      -> ack-web (10.1.0.247:5000)
-#   aha.ackmud.com  -> ack-web (10.1.0.247:5000) + stream for WSS ports
+#   ackmud.com      -> ack-web (10.1.0.247:5000) + stream for WSS ports
 #   bailes.us       -> personal-web (192.168.1.117:3000)
 
 set -euo pipefail
@@ -90,7 +89,6 @@ ACK:  $ACK_IP (eth2, vmbr2) -- reach ack-web (10.1.0.247:5000)
 
 Routing:
   ackmud.com      -> http://10.1.0.247:5000 (ack-web)
-  aha.ackmud.com  -> http://10.1.0.247:5000 (ack-web)
   bailes.us       -> http://192.168.1.117:3000 (personal-web)
   WSS :18890      -> 10.1.0.247:18890
   WSS :8891       -> 10.1.0.247:8891
@@ -205,31 +203,6 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # ACK web client websocket bridge to the internal MUD hosts.
-    location /ws {
-        proxy_pass http://10.1.0.247:5000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_read_timeout 1d;
-    }
-}
-NGINX
-
-    cat > /etc/nginx/sites-available/aha.ackmud.com <<'NGINX'
-server {
-    listen 80;
-    server_name aha.ackmud.com;
-
-    location / {
-        proxy_pass http://10.1.0.247:5000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
     # Preserve upgrade support for any ACK frontend websocket traffic.
     location /ws {
         proxy_pass http://10.1.0.247:5000;
@@ -276,9 +249,10 @@ NGINX
 
     # Enable sites
     rm -f /etc/nginx/sites-enabled/default
+    rm -f /etc/nginx/sites-enabled/aha.ackmud.com
+    rm -f /etc/nginx/sites-available/aha.ackmud.com
     ln -sf /etc/nginx/sites-available/default-health /etc/nginx/sites-enabled/
     ln -sf /etc/nginx/sites-available/ackmud.com /etc/nginx/sites-enabled/
-    ln -sf /etc/nginx/sites-available/aha.ackmud.com /etc/nginx/sites-enabled/
     ln -sf /etc/nginx/sites-available/bailes.us /etc/nginx/sites-enabled/
 
     # Stream blocks for legacy MUD WebSocket proxying
@@ -388,11 +362,11 @@ obtain_certificates() {
 
     local failed=0
 
-    # ACK sites (ackmud.com, www, aha)
+    # ACK Historical Archive
     if certbot --nginx --non-interactive --agree-tos \
         --email "$CERTBOT_EMAIL" \
         --keep-until-expiring \
-        -d ackmud.com -d www.ackmud.com -d aha.ackmud.com; then
+        -d ackmud.com -d www.ackmud.com; then
         info "Certificate obtained for ackmud.com"
     else
         echo "WARNING: certbot failed for ackmud.com (DNS may not be pointed yet)" >&2
@@ -421,7 +395,7 @@ obtain_certificates() {
 One or more certbot requests failed. This is expected if DNS is
 not yet pointed at $LAN_IP. Once DNS is live, re-run:
 
-  certbot --nginx -d ackmud.com -d www.ackmud.com -d aha.ackmud.com
+  certbot --nginx -d ackmud.com -d www.ackmud.com
   certbot --nginx -d bailes.us -d www.bailes.us
 
 Or re-run this script with --deploy-only.
