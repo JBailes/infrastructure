@@ -182,7 +182,10 @@ HBA
     mkdir -p /var/log/postgresql
     chown postgres:postgres /var/log/postgresql
 
-    systemctl restart postgresql
+    # Restart the concrete cluster unit. On Debian, postgresql.service is a
+    # wrapper and may stay active even when the cluster process was not
+    # restarted after config changes.
+    systemctl restart postgresql@17-main
     info "PostgreSQL configured and restarted"
 }
 
