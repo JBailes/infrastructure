@@ -48,7 +48,10 @@ info() { echo "==> $*"; }
 host_main() {
     info "Creating rakuen-web container (CTID $CTID)"
 
+    # create_lxc does not set onboot (only the VM helper does), so pass it
+    # explicitly -- otherwise the site does not come back after a host reboot.
     create_lxc "$CTID" "$HOSTNAME" "$LAN_IP" "$RAM" "$CORES" "$DISK" "$ROUTER_GW" "$PRIVILEGED" \
+        --onboot 1 \
     || { info "Container already exists, deploying config"; }
 
     pct start "$CTID" 2>/dev/null || true
