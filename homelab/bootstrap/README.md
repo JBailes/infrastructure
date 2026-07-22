@@ -203,6 +203,7 @@ sites. Handles TLS termination via certbot and routes by Host header:
 - **ackmud.com** -> ack-web (10.1.0.247:5000) via ACK network
 - **bailes.us** -> personal-web (192.168.1.117:3000) via LAN
 - **rakuensoftware.com** -> rakuen-web (192.168.1.119:3000) via LAN
+- **rakuensoft.com** -> 301 redirect to rakuensoftware.com
 
 Also proxies legacy MUD WebSocket traffic (ports 18890, 8891, 8892) to ack-web
 via TCP stream blocks.

@@ -19,6 +19,7 @@
 #   aha.ackmud.com  -> redirect to ackmud.com
 #   bailes.us       -> personal-web (192.168.1.117:3000)
 #   rakuensoftware.com -> rakuen-web (192.168.1.119:3000)
+#   rakuensoft.com  -> redirect to rakuensoftware.com
 
 set -euo pipefail
 
@@ -94,6 +95,7 @@ Routing:
   aha.ackmud.com  -> https://ackmud.com
   bailes.us       -> http://192.168.1.117:3000 (personal-web)
   rakuensoftware.com -> http://192.168.1.119:3000 (rakuen-web)
+  rakuensoft.com  -> https://rakuensoftware.com (301)
   WSS :18890      -> 10.1.0.247:18890
   WSS :8891       -> 10.1.0.247:8891
   WSS :8892       -> 10.1.0.247:8892
@@ -257,6 +259,14 @@ server {
 }
 NGINX
 
+    cat > /etc/nginx/sites-available/rakuensoft.com <<'NGINX'
+server {
+    listen 80;
+    server_name rakuensoft.com www.rakuensoft.com;
+    return 301 https://rakuensoftware.com$request_uri;
+}
+NGINX
+
     # Default server: health check endpoint (no Host header needed)
     cat > /etc/nginx/sites-available/default-health <<'NGINX'
 server {
@@ -281,6 +291,7 @@ NGINX
     ln -sf /etc/nginx/sites-available/aha.ackmud.com /etc/nginx/sites-enabled/
     ln -sf /etc/nginx/sites-available/bailes.us /etc/nginx/sites-enabled/
     ln -sf /etc/nginx/sites-available/rakuensoftware.com /etc/nginx/sites-enabled/
+    ln -sf /etc/nginx/sites-available/rakuensoft.com /etc/nginx/sites-enabled/
 
     # Stream blocks for legacy MUD WebSocket proxying
     mkdir -p /etc/nginx/stream.d
@@ -422,6 +433,19 @@ obtain_certificates() {
         failed=1
     fi
 
+    # Short domain (rakuensoft.com, www) -- redirects to rakuensoftware.com.
+    # It still needs its own certificate, otherwise https://rakuensoft.com
+    # fails TLS before nginx ever gets to issue the redirect.
+    if certbot --nginx --non-interactive --agree-tos \
+        --email "$CERTBOT_EMAIL" \
+        --keep-until-expiring \
+        -d rakuensoft.com -d www.rakuensoft.com; then
+        info "Certificate obtained for rakuensoft.com"
+    else
+        echo "WARNING: certbot failed for rakuensoft.com (DNS may not be pointed yet)" >&2
+        failed=1
+    fi
+
     # certbot installs a systemd timer for automatic renewal
     systemctl enable certbot.timer
     systemctl start certbot.timer
@@ -436,6 +460,7 @@ not yet pointed at $LAN_IP. Once DNS is live, re-run:
   certbot --nginx -d ackmud.com -d www.ackmud.com -d aha.ackmud.com
   certbot --nginx -d bailes.us -d www.bailes.us
   certbot --nginx -d rakuensoftware.com -d www.rakuensoftware.com
+  certbot --nginx -d rakuensoft.com -d www.rakuensoft.com
 
 Or re-run this script with --deploy-only.
 ================================================================

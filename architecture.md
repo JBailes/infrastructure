@@ -111,7 +111,7 @@ General-purpose services on the home LAN, independent of WOL.
 - **bittorrent** (192.168.1.116) -- qBittorrent-nox with triple-layer VPN enforcement (routing, iptables, watchdog). Downloads to NAS via NFS.
 - **apt-cache** (192.168.1.115) -- quad-homed package cache, described below.
 - **obs** (192.168.1.100) -- tri-homed observability stack (Loki, Prometheus, Grafana, Alertmanager), described below.
-- **nginx-proxy** (192.168.1.118) -- tri-homed nginx reverse proxy with certbot TLS. Routes ackmud.com, aha.ackmud.com, bailes.us, and rakuensoftware.com to their respective backends across all three networks.
+- **nginx-proxy** (192.168.1.118) -- tri-homed nginx reverse proxy with certbot TLS. Routes ackmud.com, aha.ackmud.com, bailes.us, rakuensoftware.com, and the rakuensoft.com redirect to their respective backends across all three networks.
 - **deploy** (192.168.1.101) -- quad-homed deployment container. GitHub Actions SSHs in on :2222 to build and deploy artifacts across all networks. Key-only auth, GitHub IP allowlist.
 - **personal-web** (192.168.1.117) -- static file server (node serve on :3000) for bailes.us.
 
