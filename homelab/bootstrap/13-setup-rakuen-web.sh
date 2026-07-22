@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # 13-setup-rakuen-web.sh -- Create and configure the Rakuen Software website LXC
 #
-# Runs on: the Proxmox host (creates CT 119, then configures it)
+# Runs on: the Proxmox host (creates CT 121, then configures it)
 #
 # Usage:
 #   ./13-setup-rakuen-web.sh               # Create CT and configure
 #   ./13-setup-rakuen-web.sh --deploy-only  # Re-run configuration on existing CT
 #   ./13-setup-rakuen-web.sh --configure    # (internal) Run inside the container
 #
-# Creates a Debian 13 LXC (CT 119) single-homed on the LAN:
-#   eth0 = 192.168.1.119/23 on vmbr0
+# Creates a Debian 13 LXC (CT 121) single-homed on the LAN:
+#   eth0 = 192.168.1.121/23 on vmbr0
 #
 # Serves rakuensoftware.com as a static site via node serve on :3000.
 # nginx-proxy (192.168.1.118) handles TLS termination and proxies here.
@@ -27,9 +27,9 @@ _LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/nu
 # Container specification
 # ---------------------------------------------------------------------------
 
-CTID=119
+CTID=121
 HOSTNAME="rakuen-web"
-LAN_IP="192.168.1.119"
+LAN_IP="192.168.1.121"
 # Deliberately larger than personal-web (256MB/1core/4GB): this site runs
 # `npm install` and a Vite production build inside the container, which OOMs
 # at 256MB. The running footprint afterwards is still just `serve`.

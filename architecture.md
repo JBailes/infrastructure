@@ -18,7 +18,7 @@ graph TB
             BT["bittorrent<br/>192.168.1.116"]
             NGINX["nginx-proxy<br/>192.168.1.118<br/>tri-homed"]
             PWEB["personal-web<br/>192.168.1.117"]
-            RWEB["rakuen-web<br/>192.168.1.119"]
+            RWEB["rakuen-web<br/>192.168.1.121"]
         end
 
         subgraph VMBR1["vmbr1 -- WOL Prod (10.0.0.0/24)"]
@@ -115,7 +115,7 @@ General-purpose services on the home LAN, independent of WOL.
 - **deploy** (192.168.1.101) -- quad-homed deployment container. GitHub Actions SSHs in on :2222 to build and deploy artifacts across all networks. Key-only auth, GitHub IP allowlist.
 - **personal-web** (192.168.1.117) -- static file server (node serve on :3000) for bailes.us.
 
-- **rakuen-web** (192.168.1.119) -- static file server (node serve on :3000) for rakuensoftware.com. Builds the Vite/React site in-container.
+- **rakuen-web** (192.168.1.121) -- static file server (node serve on :3000) for rakuensoftware.com. Builds the Vite/React site in-container.
 - **wolf** (192.168.1.120) -- Wolf cloud gaming for Moonlight-compatible game streaming. Privileged LXC with GPU passthrough.
 - **qwen103** (192.168.1.103) -- llama.cpp (Vulkan) LLM inference with AMD 7900XTX. Qwen3.6-27B Q4_K_M at 128k context. OpenAI-compatible API on :8080.
 
@@ -202,7 +202,8 @@ Each network has its own gateway(s) for NAT and DNS. They are independent and do
 | vpn-gateway | 192.168.1.104 | 104 | VM (cloud-init) | OpenVPN gateway with kill switch |
 | bittorrent | 192.168.1.116 | 116 | LXC | qBittorrent-nox, VPN-enforced |
 | personal-web | 192.168.1.117 | 117 | LXC | Static file server for bailes.us (:3000) |
-| rakuen-web | 192.168.1.119 | 119 | LXC | Static file server for rakuensoftware.com (:3000) |
+| media-stack | 192.168.1.119 | 119 | LXC | Media automation stack (Prowlarr, Sonarr, Radarr, Lidarr, Readarr) |
+| rakuen-web | 192.168.1.121 | 121 | LXC | Static file server for rakuensoftware.com (:3000) |
 | nginx-proxy | 192.168.1.118 | 118 | LXC (tri-homed) | nginx reverse proxy + certbot TLS for all web sites |
 | deploy | 192.168.1.101 | 101 | LXC (quad-homed) | GitHub Actions deployment (SSH :2222, builds + deploys) |
 | wolf | 192.168.1.120 | 120 | LXC (privileged) | Wolf cloud gaming (Moonlight streaming) |

@@ -22,7 +22,7 @@ graph TB
             BT["bittorrent<br/>192.168.1.116<br/>qBittorrent-nox"]
             NGINX["nginx-proxy<br/>192.168.1.118 (vmbr0)<br/>10.0.0.118 (vmbr1)<br/>10.1.0.118 (vmbr2)<br/>nginx + certbot"]
             PWEB["personal-web<br/>192.168.1.117<br/>node serve :3000"]
-            RWEB["rakuen-web<br/>192.168.1.119<br/>node serve :3000"]
+            RWEB["rakuen-web<br/>192.168.1.121<br/>node serve :3000"]
             WOLF["wolf<br/>192.168.1.120<br/>Moonlight streaming"]
             LLM["qwen103<br/>192.168.1.103<br/>llama-server :8080<br/>Qwen3.6-27B @ 128k<br/>AMD 7900XTX (Vulkan)"]
         end
@@ -94,7 +94,8 @@ graph LR
 | 192.168.1.104 | vpn-gateway | 104 | VM (cloud-init) | OpenVPN gateway with kill switch |
 | 192.168.1.116 | bittorrent | 116 | LXC (privileged) | qBittorrent-nox, triple VPN enforcement |
 | 192.168.1.117 | personal-web | 117 | LXC (unprivileged) | Static file server (bailes.us) on :3000 |
-| 192.168.1.119 | rakuen-web | 119 | LXC (unprivileged) | Static file server (rakuensoftware.com) on :3000 |
+| 192.168.1.119 | media-stack | 119 | LXC (privileged) | Prowlarr / Sonarr / Radarr / Lidarr / Readarr |
+| 192.168.1.121 | rakuen-web | 121 | LXC (unprivileged) | Static file server (rakuensoftware.com) on :3000 |
 | 192.168.1.118 (vmbr0), 10.0.0.118 (vmbr1), 10.1.0.118 (vmbr2) | nginx-proxy | 118 | LXC (unprivileged, tri-homed) | nginx reverse proxy + certbot TLS for all web sites |
 | 192.168.1.120 | wolf | 120 | LXC (privileged, GPU passthrough) | Wolf cloud gaming (Moonlight streaming) |
 | 192.168.1.103 | qwen103 | 103 | LXC (privileged, AMD 7900XTX via /dev/dri only) | llama.cpp (Vulkan) serving Qwen3.6-27B Q4_K_M at 128k context, OpenAI-compatible API on :8080 |

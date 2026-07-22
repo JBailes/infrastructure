@@ -18,7 +18,7 @@ Run each script directly on the Proxmox host, in order:
 # Phase 2: web infrastructure
 ./06-setup-nginx-proxy.sh         # CT 118, nginx reverse proxy (tri-homed)
 ./07-setup-personal-web.sh        # CT 117, personal website (bailes.us)
-./13-setup-rakuen-web.sh          # CT 119, Rakuen Software site (rakuensoftware.com)
+./13-setup-rakuen-web.sh          # CT 121, Rakuen Software site (rakuensoftware.com)
 
 # Phase 3: dashboards and host observability
 ./08-setup-dashboards.sh          # Grafana dashboards + blackbox_exporter on obs
@@ -48,7 +48,7 @@ All CTIDs are static. IPs follow the convention `X.X.X.{CTID}` on each network.
 | apt-cache | 115 | 192.168.1.115 (LAN), 10.0.0.115 (WOL), 10.1.0.115 (ACK) |
 | bittorrent | 116 | 192.168.1.116 |
 | personal-web | 117 | 192.168.1.117 |
-| rakuen-web | 119 | 192.168.1.119 |
+| rakuen-web | 121 | 192.168.1.121 |
 | nginx-proxy | 118 | 192.168.1.118 (LAN), 10.0.0.118 (WOL), 10.1.0.118 (ACK) |
 | media-stack | 119 | 192.168.1.119 |
 | qwen103 | 103 | 192.168.1.103 |
@@ -202,7 +202,7 @@ sites. Handles TLS termination via certbot and routes by Host header:
 
 - **ackmud.com** -> ack-web (10.1.0.247:5000) via ACK network
 - **bailes.us** -> personal-web (192.168.1.117:3000) via LAN
-- **rakuensoftware.com** -> rakuen-web (192.168.1.119:3000) via LAN
+- **rakuensoftware.com** -> rakuen-web (192.168.1.121:3000) via LAN
 - **rakuensoft.com** -> 301 redirect to rakuensoftware.com
 
 Also proxies legacy MUD WebSocket traffic (ports 18890, 8891, 8892) to ack-web
@@ -228,12 +228,12 @@ port 3000 for bailes.us.
 
 ---
 
-## 13 - Rakuen Web (CTID 119, 192.168.1.119)
+## 13 - Rakuen Web (CTID 121, 192.168.1.121)
 
 Single-homed LXC on the home LAN running a static file server (node serve) on
 port 3000 for rakuensoftware.com.
 
-- **eth0**: 192.168.1.119/23 on vmbr0
+- **eth0**: 192.168.1.121/23 on vmbr0
 - TLS termination handled by nginx-proxy (192.168.1.118)
 - Firewall: :3000 from LAN (nginx-proxy connects here), SSH from LAN
 - Sized 1024MB / 2 cores / 8GB: the site is a Vite + React SPA built
@@ -418,7 +418,7 @@ aimee agent test qwen103        # connectivity check
 Privileged LXC container running the media automation stack via Docker Compose.
 All services route through the VPN gateway (192.168.1.104).
 
-- **eth0**: 192.168.1.119/23 on vmbr0 (LAN, gateway = VPN gateway)
+- **eth0**: 192.168.1.121/23 on vmbr0 (LAN, gateway = VPN gateway)
 
 ### Prerequisites
 

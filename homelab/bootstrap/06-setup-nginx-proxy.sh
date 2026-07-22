@@ -18,7 +18,7 @@
 #   ackmud.com      -> ack-web (10.1.0.247:5000) + stream for WSS ports
 #   aha.ackmud.com  -> redirect to ackmud.com
 #   bailes.us       -> personal-web (192.168.1.117:3000)
-#   rakuensoftware.com -> rakuen-web (192.168.1.119:3000)
+#   rakuensoftware.com -> rakuen-web (192.168.1.121:3000)
 #   rakuensoft.com  -> redirect to rakuensoftware.com
 
 set -euo pipefail
@@ -94,7 +94,7 @@ Routing:
   ackmud.com      -> http://10.1.0.247:5000 (ack-web)
   aha.ackmud.com  -> https://ackmud.com
   bailes.us       -> http://192.168.1.117:3000 (personal-web)
-  rakuensoftware.com -> http://192.168.1.119:3000 (rakuen-web)
+  rakuensoftware.com -> http://192.168.1.121:3000 (rakuen-web)
   rakuensoft.com  -> https://rakuensoftware.com (301)
   WSS :18890      -> 10.1.0.247:18890
   WSS :8891       -> 10.1.0.247:8891
@@ -250,7 +250,7 @@ server {
     server_name rakuensoftware.com www.rakuensoftware.com;
 
     location / {
-        proxy_pass http://192.168.1.119:3000;
+        proxy_pass http://192.168.1.121:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
