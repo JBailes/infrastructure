@@ -43,9 +43,18 @@ configure() {
     MOUNT_POINT="/mnt/torrents"
     LAN_IFACE="eth0"
     LAN_SUBNET="192.168.0.0/23"
+    # Everything RFC1918 on 192.168/16 is treated as local and allowed; the
+    # router is excluded explicitly above and must never be reachable.
+    LAN_SUPERNET="192.168.0.0/16"
+    ROUTER_IP="${ROUTER_GW:-192.168.1.1}"
     QBIT_PORT="8080"
     QBIT_EXT_PORT="80"
     QBIT_USER="qbittorrent"
+    # Must match the ownership of the NAS share, which is 1000:1000 mode 775.
+    # `useradd -r` would pick an arbitrary system uid, which lands in "other"
+    # and cannot write -- see ensure_qbit_user().
+    QBIT_UID="${QBIT_UID:-1000}"
+    QBIT_GID="${QBIT_GID:-1000}"
     APT_CACHE="${APT_CACHE_IP:-192.168.1.103}"
     APT_CACHE_PORT="3142"
 
@@ -74,6 +83,25 @@ APTPROXY
         fi
     }
 
+    # -- Resolver
+    #
+    # The VPN gateway runs dnsmasq forwarding to the tunnel's DNS, so lookups
+    # leave encrypted. Anything else -- including the internal resolver --
+    # forwards to the router and therefore to the ISP, which leaks every
+    # tracker and peer hostname even though the payload is tunnelled.
+    # The authoritative fix is on the host side: host_main sets the
+    # container's nameserver so PVE writes this file correctly on every
+    # start. Rewriting it here just makes the running container correct
+    # immediately, without waiting for a restart. Deliberately NOT made
+    # immutable -- PVE manages this file, and locking it breaks container
+    # start and every later re-run.
+    configure_resolver() {
+        info "Pointing DNS at the VPN gateway ($VPN_GATEWAY)"
+        cat > /etc/resolv.conf <<RESOLV
+nameserver $VPN_GATEWAY
+RESOLV
+    }
+
     # -- Packages
     install_packages() {
         info "Installing packages"
@@ -82,13 +110,45 @@ APTPROXY
             qbittorrent-nox nfs-common iptables iptables-persistent curl
     }
 
+    # Create the service account with an explicit uid/gid so it matches the
+    # NAS share owner. Safe to re-run, and repairs an account that was
+    # created earlier with the wrong ids.
+    ensure_qbit_user() {
+        # A group with the target GID must exist before usermod -g can use it.
+        # Creating one by name is not enough: the name may already be taken at
+        # the wrong gid, in which case groupadd fails and usermod then has no
+        # target gid to move to.
+        if ! getent group "$QBIT_GID" >/dev/null 2>&1; then
+            if getent group "$QBIT_USER" >/dev/null 2>&1; then
+                info "Moving group $QBIT_USER to gid $QBIT_GID"
+                systemctl stop qbittorrent-nox 2>/dev/null || true
+                groupmod -g "$QBIT_GID" "$QBIT_USER"
+            else
+                groupadd -g "$QBIT_GID" "$QBIT_USER"
+            fi
+        fi
+
+        if id "$QBIT_USER" &>/dev/null; then
+            local cur_uid cur_gid
+            cur_uid=$(id -u "$QBIT_USER")
+            cur_gid=$(id -g "$QBIT_USER")
+            if [[ "$cur_uid" != "$QBIT_UID" || "$cur_gid" != "$QBIT_GID" ]]; then
+                info "Repairing $QBIT_USER ids: ${cur_uid}:${cur_gid} -> ${QBIT_UID}:${QBIT_GID}"
+                systemctl stop qbittorrent-nox 2>/dev/null || true
+                usermod -u "$QBIT_UID" -g "$QBIT_GID" "$QBIT_USER"
+                chown -R "$QBIT_UID:$QBIT_GID" /var/lib/qbittorrent 2>/dev/null || true
+            fi
+        else
+            useradd -r -m -d /var/lib/qbittorrent -s /usr/sbin/nologin \
+                -u "$QBIT_UID" -g "$QBIT_GID" "$QBIT_USER"
+        fi
+    }
+
     # -- NFS mount
     setup_nfs_mount() {
         info "Configuring NFS mount to NAS"
 
-        if ! id "$QBIT_USER" &>/dev/null; then
-            useradd -r -m -d /var/lib/qbittorrent -s /usr/sbin/nologin "$QBIT_USER"
-        fi
+        ensure_qbit_user
 
         mkdir -p "$MOUNT_POINT"
 
@@ -118,8 +178,24 @@ FSTAB
     }
 
     # -- Kill switch (iptables)
+    #
+    # Egress policy, in order. Order is the whole point: iptables takes the
+    # first match, so the router DROP has to precede every ACCEPT.
+    #
+    #   1. the router is DROPped first, unconditionally. Not after an
+    #      established-state accept, not after the LAN accept -- first. It is
+    #      the one address that could carry traffic straight to the ISP.
+    #   2. DNS is allowed only to the VPN gateway, and every other resolver is
+    #      dropped. Name lookups are traffic: resolving trackers through a LAN
+    #      resolver that forwards to the router leaks them to the ISP even
+    #      while the payload rides the tunnel.
+    #   3. LAN is allowed (NAS, WebUI, the gateway itself).
+    #   4. anything else is internet-bound and can only leave through the
+    #      default route, which is the VPN gateway. The router being blocked
+    #      means there is no second way out: if the tunnel is down the packets
+    #      die at the gateway rather than falling back.
     setup_firewall() {
-        info "Configuring local iptables kill switch"
+        info "Configuring egress kill switch"
 
         iptables -F
         iptables -t nat -F
@@ -128,6 +204,14 @@ FSTAB
         iptables -P INPUT DROP
         iptables -P FORWARD DROP
         iptables -P OUTPUT DROP
+
+        # --- 1. The router, before anything else can allow it ---
+        # LOG first: a DROP terminates evaluation, so a LOG placed after it
+        # never fires. Rate-limited so a misbehaving client cannot flood the
+        # journal.
+        iptables -A OUTPUT -d "$ROUTER_IP" -m limit --limit 6/min \
+            -j LOG --log-prefix "BT-ROUTER-BLOCKED: " --log-level 4 2>/dev/null || true
+        iptables -A OUTPUT -d "$ROUTER_IP" -j DROP
 
         # --- Loopback ---
         iptables -A INPUT -i lo -j ACCEPT
@@ -141,28 +225,44 @@ FSTAB
         iptables -A INPUT -i "$LAN_IFACE" -p tcp --dport 22 -j ACCEPT
         iptables -A INPUT -i "$LAN_IFACE" -p tcp --dport "$QBIT_PORT" -j ACCEPT
 
-        # --- OUTPUT ---
-        # Block router (must not bypass VPN gateway)
-        iptables -A OUTPUT -d 192.168.1.1 -j DROP
+        # --- 2. DNS: the VPN gateway only ---
+        iptables -A OUTPUT -d "$VPN_GATEWAY" -p udp --dport 53 -j ACCEPT
+        iptables -A OUTPUT -d "$VPN_GATEWAY" -p tcp --dport 53 -j ACCEPT
+        iptables -A OUTPUT -p udp --dport 53 -j DROP
+        iptables -A OUTPUT -p tcp --dport 53 -j DROP
+        # DNS-over-TLS would sidestep the above, so close it too.
+        iptables -A OUTPUT -p tcp --dport 853 -j DROP
+        iptables -A OUTPUT -p udp --dport 853 -j DROP
 
-        # Allow everything else. Torrent peers have public IPs, so we
-        # cannot restrict to LAN only. Routing sends all traffic through
-        # the VPN gateway, whose kill switch ensures
-        # nothing exits unencrypted.
+        # --- 3. LAN (NAS, WebUI replies, the gateway) ---
+        iptables -A OUTPUT -d "$LAN_SUPERNET" -j ACCEPT
+
+        # --- 4. Everything else: internet, forced through the default route ---
+        # Torrent peers have public addresses, so this cannot be narrowed by
+        # destination. It is constrained by routing instead: the only way off
+        # this subnet is the VPN gateway, and the router is dropped above.
         iptables -A OUTPUT -j ACCEPT
 
-        iptables-save > /etc/iptables/rules.v4
+        # IPv6 is disabled by sysctl, but a disabled stack that later comes
+        # back would bypass every rule above. Deny it explicitly.
+        if command -v ip6tables >/dev/null 2>&1; then
+            ip6tables -P INPUT DROP  2>/dev/null || true
+            ip6tables -P OUTPUT DROP 2>/dev/null || true
+            ip6tables -P FORWARD DROP 2>/dev/null || true
+        fi
 
-        info "Kill switch active: all outbound allowed except 192.168.1.1 (router)"
+        mkdir -p /etc/iptables
+        iptables-save > /etc/iptables/rules.v4
+        command -v ip6tables-save >/dev/null 2>&1 && ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
+
+        info "Egress locked: router DROPped, DNS only via $VPN_GATEWAY, internet only via default route"
     }
 
     # -- qBittorrent-nox configuration
     setup_qbittorrent() {
         info "Configuring qBittorrent-nox"
 
-        if ! id "$QBIT_USER" &>/dev/null; then
-            useradd -r -m -d /var/lib/qbittorrent -s /usr/sbin/nologin "$QBIT_USER"
-        fi
+        ensure_qbit_user
 
         local config_dir="/var/lib/qbittorrent/.config/qBittorrent"
         mkdir -p "$config_dir"
@@ -314,6 +414,7 @@ WDTIMER
 
     # -- Run in-container setup
     configure_apt_proxy
+    configure_resolver
     install_packages
     setup_nfs_mount
     setup_firewall
@@ -358,6 +459,15 @@ host_main() {
             info "CREATED: CT $ctid ($hostname) at $ip"
         fi
     fi
+
+    # Force the resolver to the VPN gateway ALONE, on every run.
+    #
+    # create_lxc passes --nameserver "$DNS_IP" for the internal resolver,
+    # and this script passes the gateway, so pct ends up writing BOTH into
+    # resolv.conf. The internal resolver forwards to the router and therefore
+    # the ISP, so tracker lookups leaked out of the tunnel even though the
+    # payload was tunnelled. This host is the one that must not use it.
+    pct set "$ctid" --nameserver "$VPN_GATEWAY_IP"
 
     # Verify CT is running before deploying
     if ! pct status "$ctid" 2>/dev/null | grep -q "running"; then
