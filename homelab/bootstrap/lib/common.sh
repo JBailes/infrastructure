@@ -66,7 +66,13 @@ CTID_PERSONAL_WEB=106
 CTID_RAKUEN_WEB=107
 CTID_BITTORRENT=108
 CTID_DEPLOY=109
-VPN_GATEWAY_VMID=110
+# 110 was the hand-rolled OpenVPN gateway VM. It has been replaced by
+# smoothrouter, which performs the same role (tunnel + kill switch + resolver)
+# through routerd rather than a pile of shell. The old ID is left unused rather
+# than recycled, so a stale reference fails loudly instead of pointing at the
+# wrong host.
+SMOOTHROUTER_VMID=111
+VPN_GATEWAY_VMID="${VPN_GATEWAY_VMID:-$SMOOTHROUTER_VMID}"
 
 # A host's address follows from its CTID.
 host_ip() { echo "192.168.1.${1:?Usage: host_ip <ctid>}"; }
@@ -108,7 +114,9 @@ resolve_host() {
 # CTID allocation and resolution
 # ---------------------------------------------------------------------------
 
-VPN_GATEWAY_HOST="vpn-gateway.${INTERNAL_ZONE}"
+# vpn-gateway.<zone> remains an alias for smoothrouter so existing
+# references keep resolving.
+VPN_GATEWAY_HOST="smoothrouter.${INTERNAL_ZONE}"
 CLOUD_IMAGE_FILENAME="debian-13-genericcloud-amd64.qcow2"
 CLOUD_IMAGE_URL="https://cloud.debian.org/images/cloud/trixie/latest/${CLOUD_IMAGE_FILENAME}"
 CLOUD_IMAGE_PATH="${IMAGE_STORAGE_PATH}/template/iso/${CLOUD_IMAGE_FILENAME}"

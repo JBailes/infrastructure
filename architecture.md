@@ -17,8 +17,8 @@ graph TB
     subgraph PVE["Proxmox Host (192.168.1.253)"]
         subgraph VMBR0["vmbr0 -- Home LAN (192.168.0.0/23)"]
             ROUTER["Router<br/>192.168.1.1"]
-            DNS["dns<br/>192.168.1.149<br/>Technitium<br/>authoritative: bailes.us"]
-            VPN["vpn-gateway<br/>192.168.1.104<br/>OpenVPN + kill switch"]
+            DNS["dns<br/>192.168.1.101<br/>Technitium<br/>authoritative: bailes.us"]
+            VPN["smoothrouter<br/>192.168.1.111<br/>routerd: tunnel + kill switch"]
             BT["bittorrent"]
             NGINX["nginx-proxy<br/>dual-homed<br/>TLS termination"]
             PWEB["personal-web"]
@@ -96,7 +96,7 @@ estate.
 | *102* | *unifi (not managed here)* | | 107 | rakuen-web |
 | 103 | apt-cache | | 108 | bittorrent |
 | 104 | obs | | 109 | deploy |
-| 105 | nginx-proxy | | 110 | vpn-gateway (VM) |
+| 105 | nginx-proxy | | 111 | smoothrouter (VM) |
 
 `dns` is first, so `192.168.1.101` is predictable — which matters because it is
 the bootstrap floor: every other container needs somewhere to point
@@ -171,11 +171,36 @@ terraform apply          # containers + DNS records
 homelab/bootstrap/*.sh   # in-guest configuration
 ```
 
+## VPN gateway (smoothrouter)
+
+The hand-rolled OpenVPN gateway VM has been replaced by
+[smoothrouter](https://github.com/RakuenSoftware/smoothrouter), which performs
+the same role through `routerd`: an OpenVPN client tunnel, a fail-closed kill
+switch, and a resolver for the clients behind it.
+
+The kill switch works **by omission**. With it on, the firewall emits
+`LAN -> tunnel` accepts and *no* `LAN -> WAN` accept at all, so the forward
+chain's drop policy catches everything else. Nothing has to notice the tunnel
+is down and react — there is simply no rule permitting the traffic.
+
+Two lessons from the gateway it replaces are encoded in `routerd`:
+
+- provider configs ship `ping-restart 0`, which disables reconnect-on-dead-peer;
+  `Normalise()` replaces it. `persist-tun` is kept deliberately, so the
+  kill-switch rules never lapse mid-reconnect.
+- because `persist-tun` keeps `tun0` present through a dead tunnel, interface
+  presence proves nothing. Status is reported from packets actually sent out
+  the tunnel, and "up but not flowing" is surfaced as an error.
+
+Clients behind it resolve through the gateway's `dnsmasq`, which forwards to
+the tunnel's resolvers — resolving via the LAN or the router would send every
+hostname to the ISP in cleartext while the payload rode the tunnel.
+
 ## Self-healing
 
-The VPN gateway and the ACK hosts run watchdogs that probe the **service**
-rather than the process, because systemd reporting a unit `active` turned out
-to be no evidence at all that it was working:
+The ACK hosts run watchdogs that probe the **service** rather than the
+process, because systemd reporting a unit `active` turned out to be no
+evidence at all that it was working:
 
 - `dnsmasq` on ack-gateway was dead for 18 days (startup race against `eth1`)
 - `assault30` sat wedged for 6 days with a full accept queue, unit `active`
@@ -196,7 +221,7 @@ CTIDs are dynamic; `terraform output hosts` is the source of truth.
 | apt-cache | LXC (dual-homed) | apt-cacher-ng package cache |
 | obs | LXC (dual-homed) | Loki + Prometheus + Grafana + Alertmanager |
 | nginx-proxy | LXC (dual-homed) | Reverse proxy + ACME TLS termination |
-| vpn-gateway | VM (cloud-init) | OpenVPN gateway with kill switch, self-healing |
+| smoothrouter | VM (cloud-init) | routerd VPN gateway: tunnel, fail-closed kill switch, resolver |
 | bittorrent | LXC (privileged) | qBittorrent-nox, routed via the VPN gateway |
 | personal-web | LXC | Static file server (bailes.us) |
 | rakuen-web | LXC | Static file server (rakuensoftware.com) |
