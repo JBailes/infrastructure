@@ -51,6 +51,9 @@ INTERNAL_ZONE="${INTERNAL_ZONE:-bailes.us}"
 
 err()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
+# Defined here as well as in common.sh: this script is pushed into the
+# container on its own, so the library is not available to --configure.
+warn() { echo "WARN: $*" >&2; }
 
 # ---------------------------------------------------------------------------
 # Host-side: create the container
@@ -70,6 +73,7 @@ host_main() {
     sleep 3
 
     deploy_script "$CTID" "$0"
+    register_dns "$HOSTNAME" "$LAN_IP"
 
     info "obs container ready (CTID $CTID)"
 
@@ -92,44 +96,33 @@ deploy_promtail_to_homelab() {
 
     info "Deploying Promtail to homelab LAN hosts"
 
-    # apt-cache (CT 115)
-    if pct status 115 &>/dev/null; then
-        info "Deploying Promtail to apt-cache (CT 115)"
-        deploy_script 115 "$promtail_script"
-    else
-        echo "WARN: apt-cache (CT 115) not running, skipping" >&2
-    fi
+    # Driven by the CTID table in lib/common.sh rather than literals: these
+    # were pinned to 115/116/117/118 and 192.168.1.104, all of which moved
+    # when the hosts were renumbered, so Promtail silently went nowhere.
+    local entry name ctid
+    for entry in \
+        "apt-cache:${CTID_APT_CACHE}" \
+        "bittorrent:${CTID_BITTORRENT}" \
+        "nginx-proxy:${CTID_NGINX_PROXY}" \
+        "personal-web:${CTID_PERSONAL_WEB}" \
+        "rakuen-web:${CTID_RAKUEN_WEB}" \
+        "deploy:${CTID_DEPLOY}"; do
+        name="${entry%%:*}"
+        ctid="${entry##*:}"
+        if pct status "$ctid" &>/dev/null; then
+            info "Deploying Promtail to ${name} (CT ${ctid})"
+            deploy_script "$ctid" "$promtail_script"
+        else
+            echo "WARN: ${name} (CT ${ctid}) not present, skipping" >&2
+        fi
+    done
 
-    # bittorrent (CT 116)
-    if pct status 116 &>/dev/null; then
-        info "Deploying Promtail to bittorrent (CT 116)"
-        deploy_script 116 "$promtail_script"
+    # vpn-gateway is a VM, reached over SSH rather than pct.
+    if qm status "$VPN_GATEWAY_VMID" &>/dev/null; then
+        info "Deploying Promtail to vpn-gateway (VM ${VPN_GATEWAY_VMID})"
+        deploy_script_vm "$VPN_GATEWAY_IP" "$promtail_script"
     else
-        echo "WARN: bittorrent (CT 116) not running, skipping" >&2
-    fi
-
-    # vpn-gateway (VM 104, deploy via SSH)
-    if qm status 104 &>/dev/null; then
-        info "Deploying Promtail to vpn-gateway (VM 104)"
-        deploy_script_vm "192.168.1.104" "$promtail_script"
-    else
-        echo "WARN: vpn-gateway (VM 104) not running, skipping" >&2
-    fi
-
-    # nginx-proxy (CT 118)
-    if pct status 118 &>/dev/null; then
-        info "Deploying Promtail to nginx-proxy (CT 118)"
-        deploy_script 118 "$promtail_script"
-    else
-        echo "WARN: nginx-proxy (CT 118) not running, skipping" >&2
-    fi
-
-    # personal-web (CT 117)
-    if pct status 117 &>/dev/null; then
-        info "Deploying Promtail to personal-web (CT 117)"
-        deploy_script 117 "$promtail_script"
-    else
-        echo "WARN: personal-web (CT 117) not running, skipping" >&2
+        echo "WARN: vpn-gateway (VM ${VPN_GATEWAY_VMID}) not present, skipping" >&2
     fi
 
     info "Promtail deployment to homelab LAN hosts complete"
@@ -288,9 +281,17 @@ setup_directories() {
         "$OBS_DATA/alertmanager" \
         /etc/prometheus/rules.d
 
-    # Loki and Prometheus run as dedicated users
+    # Loki, Prometheus and Alertmanager run as dedicated users.
+    #
+    # The group is created explicitly: `useradd --system <name>` puts the new
+    # user in a default group rather than creating a matching one, so the
+    # chown below failed with "invalid group: 'loki:loki'".
     for svc in loki prometheus alertmanager; do
-        id -u "$svc" &>/dev/null || useradd --system --no-create-home --shell /usr/sbin/nologin "$svc"
+        getent group "$svc" >/dev/null 2>&1 || groupadd --system "$svc"
+        id -u "$svc" &>/dev/null || useradd --system --gid "$svc" \
+            --no-create-home --shell /usr/sbin/nologin "$svc"
+        # An account that predates this fix may still be in the wrong group.
+        usermod --gid "$svc" "$svc" 2>/dev/null || true
     done
     chown loki:loki "$OBS_DATA/loki"
     chown prometheus:prometheus "$OBS_DATA/prometheus"

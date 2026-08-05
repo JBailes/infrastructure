@@ -52,6 +52,7 @@ host_main() {
     sleep 3
 
     deploy_script "$CTID" "$0"
+    register_dns "$HOSTNAME" "$LAN_IP"
 
     info "personal-web container ready (CTID $CTID)"
 }

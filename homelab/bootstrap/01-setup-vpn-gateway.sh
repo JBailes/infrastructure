@@ -10,14 +10,14 @@
 #   ./01-setup-vpn-gateway.sh --configure    # (internal) Run inside the VM
 #
 # Creates a Debian 13 cloud-init VM (VMID 104):
-#   eth0 = 192.168.1.104/23 on vmbr0 (LAN)
+#   eth0 = 192.168.1.<VMID>/23 on vmbr0 (LAN)
 #
 # Prerequisites (must exist alongside this script before running):
 #   secrets/client.ovpn   -- OpenVPN client config file
 #   secrets/auth.txt      -- credentials file (username on line 1, password on line 2)
 #
 # This VM acts as a VPN gateway for the LAN. Any device that sets its
-# default gateway (and DNS) to 192.168.1.104 will have all traffic routed
+# default gateway (and DNS) to its address will have all traffic routed
 # through the VPN tunnel. A kill switch ensures forwarded traffic is NEVER
 # sent unencrypted.
 #
@@ -364,11 +364,11 @@ DNS
     cat <<EOF
 
 ================================================================
-vpn-gateway setup complete (192.168.1.104).
+vpn-gateway setup complete ($ip).
 
 VPN:         $VPN_REMOTE:$VPN_PORT/$VPN_PROTO
 Kill switch: Active (FORWARD only through tun0, DROP if tunnel down)
-DNS:         dnsmasq on 192.168.1.104:53 (forwarding to VPN DNS)
+DNS:         dnsmasq on $ip:53 (forwarding to VPN DNS)
 apt proxy:   ${APT_CACHE}:${APT_CACHE_PORT}
 Self-heal:   Restart=always + ping-restart 60 + watchdog every 30s
              (3 failed probes -> restart, 3 failed restarts -> reboot)
@@ -377,7 +377,7 @@ Metrics:     node_exporter :9100, vpn_gateway_tunnel_up
 Watchdog logs:  journalctl -t vpn-healthcheck -f
 Watchdog state: systemctl list-timers vpn-healthcheck.timer
 
-To use: set a device's default gateway and DNS to 192.168.1.104.
+To use: set a device's default gateway and DNS to $ip.
 To stop: set the device's gateway and DNS back to 192.168.1.1.
 ================================================================
 EOF
@@ -438,6 +438,7 @@ host_main() {
 
     info "Deploying $hostname configuration (VM $vmid)"
     deploy_script_vm "$ip" "$SCRIPT_DIR/01-setup-vpn-gateway.sh"
+    register_dns "$hostname" "$ip"
 }
 
 # ===================================================================

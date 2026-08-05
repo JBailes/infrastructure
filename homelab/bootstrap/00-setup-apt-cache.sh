@@ -240,6 +240,7 @@ host_main() {
 
     info "Deploying $hostname configuration (CT $ctid)"
     deploy_script "$ctid" "$SCRIPT_DIR/00-setup-apt-cache.sh"
+    register_dns "$hostname" "$ip"
 }
 
 # ===================================================================

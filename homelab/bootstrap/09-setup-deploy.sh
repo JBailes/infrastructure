@@ -13,16 +13,49 @@
 #   - Promtail log shipping
 #
 # Usage:
-#   ./09-setup-deploy.sh --configure    # Run inside the container
+#   ./09-setup-deploy.sh                # Create CT and configure
+#   ./09-setup-deploy.sh --deploy-only  # Re-run configuration on existing CT
+#   ./09-setup-deploy.sh --configure    # (internal) Run inside the container
 
 set -euo pipefail
 
-LAN_IP="192.168.1.101"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/null || true
+
+CTID="${CTID_DEPLOY:-109}"
+HOSTNAME="deploy"
+LAN_IP="192.168.1.${CTID}"
+# The ACK address is fixed, not derived from the CTID: ack-gateway's dnsmasq
+# has a static entry for 10.1.0.101 and that network is not renumbered.
 ACK_IP="10.1.0.101"
 SSH_PORT="2222"
+RAM=2048
+CORES=2
+DISK=32
+PRIVILEGED="no"
 
 err()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
+
+# ---------------------------------------------------------------------------
+# Host-side: create the container
+# ---------------------------------------------------------------------------
+
+host_main() {
+    info "Creating deploy container (CTID $CTID)"
+
+    create_lxc "$CTID" "$HOSTNAME" "$LAN_IP" "$RAM" "$CORES" "$DISK" "$ROUTER_GW" "$PRIVILEGED" \
+        --net1 "name=eth1,bridge=${ACK_BRIDGE},ip=${ACK_IP}/24" \
+    || { info "Container already exists, deploying config"; }
+
+    pct start "$CTID" 2>/dev/null || true
+    sleep 3
+
+    deploy_script "$CTID" "$0"
+    register_dns "$HOSTNAME" "$LAN_IP"
+
+    info "deploy container ready (CTID $CTID)"
+}
 
 # ---------------------------------------------------------------------------
 # Container-side: configure everything
@@ -581,8 +614,10 @@ CRON
 
 if [[ "${1:-}" == "--configure" ]]; then
     configure
+elif [[ "${1:-}" == "--deploy-only" ]]; then
+    pct start "$CTID" 2>/dev/null || true
+    sleep 3
+    deploy_script "$CTID" "$0"
 else
-    echo "Usage: $0 --configure (run inside the container)"
-    echo "This script is deployed to CT 101 by the operator."
-    exit 1
+    host_main
 fi

@@ -10,14 +10,14 @@
 #   ./02-setup-bittorrent.sh --configure    # (internal) Run inside the container
 #
 # Creates a privileged Debian 13 LXC (CT 116):
-#   eth0 = 192.168.1.116/23 on vmbr0 (LAN, gateway = VPN gateway 192.168.1.104)
+#   eth0 = 192.168.1.<CTID>/23 on vmbr0 (LAN, gateway = the VPN gateway)
 #
 # Prerequisites:
-#   - VPN gateway (192.168.1.104) must be running
-#   - NAS NFS export 192.168.1.254:/mnt/data/storage/bittorrent must be accessible
+#   - the VPN gateway VM must be running
+#   - NAS NFS export 192.168.1.254:/mnt/media/storage/bittorrent must be accessible
 #
 # This container runs qBittorrent-nox with three layers of VPN enforcement:
-#   1. Default gateway is the VPN gateway (192.168.1.104), which has its own
+#   1. Default gateway is the VPN gateway, which has its own
 #      kill switch that drops all forwarded traffic if the tunnel is down
 #   2. Local iptables: OUTPUT policy DROP, only allows traffic to the VPN
 #      gateway and NAS
@@ -33,9 +33,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ===================================================================
 
 configure() {
-    VPN_GATEWAY="192.168.1.104"
+    VPN_GATEWAY="${VPN_GATEWAY_IP:-192.168.1.110}"
     NAS_HOST="192.168.1.254"
-    NAS_EXPORT="192.168.1.254:/mnt/data/storage/bittorrent"
+    # The NAS exports /mnt/media/storage (to *), not /mnt/data/storage --
+    # the old path simply does not exist there, so the mount failed with
+    # "access denied by server" which reads like a permissions problem but
+    # is not. Verified with showmount -e against the live NAS.
+    NAS_EXPORT="${NAS_EXPORT:-192.168.1.254:/mnt/media/storage/bittorrent}"
     MOUNT_POINT="/mnt/torrents"
     LAN_IFACE="eth0"
     LAN_SUBNET="192.168.0.0/23"
@@ -88,12 +92,19 @@ APTPROXY
 
         mkdir -p "$MOUNT_POINT"
 
-        if ! grep -q "$NAS_EXPORT" /etc/fstab; then
-            cat >> /etc/fstab <<FSTAB
+        # Replace any existing entry for this mount point rather than only
+        # appending when absent. Appending left a stale export alongside the
+        # new one, and mount(8) takes the FIRST match -- so a corrected path
+        # was silently ignored in favour of the broken one already there.
+        if grep -q "[[:space:]]${MOUNT_POINT}[[:space:]]" /etc/fstab; then
+            grep -v "[[:space:]]${MOUNT_POINT}[[:space:]]" /etc/fstab > /etc/fstab.new
+            mv /etc/fstab.new /etc/fstab
+        fi
+        cat >> /etc/fstab <<FSTAB
 $NAS_EXPORT $MOUNT_POINT nfs defaults,_netdev,nofail 0 0
 FSTAB
-        fi
 
+        umount "$MOUNT_POINT" 2>/dev/null || true
         mount -a
 
         if mountpoint -q "$MOUNT_POINT"; then
@@ -136,7 +147,7 @@ FSTAB
 
         # Allow everything else. Torrent peers have public IPs, so we
         # cannot restrict to LAN only. Routing sends all traffic through
-        # the VPN gateway (192.168.1.104), whose kill switch ensures
+        # the VPN gateway, whose kill switch ensures
         # nothing exits unencrypted.
         iptables -A OUTPUT -j ACCEPT
 
@@ -219,7 +230,7 @@ SERVICE
 #!/usr/bin/env bash
 # VPN watchdog: stop qBittorrent if traffic would not go through VPN gateway
 
-VPN_GATEWAY="192.168.1.104"
+VPN_GATEWAY="192.168.1.110"
 SERVICE="qbittorrent-nox"
 LOGFILE="/var/log/vpn-watchdog.log"
 
@@ -355,6 +366,7 @@ host_main() {
 
     info "Deploying $hostname configuration (CT $ctid)"
     deploy_script "$ctid" "$SCRIPT_DIR/02-setup-bittorrent.sh"
+    register_dns "$hostname" "$ip"
 }
 
 # ===================================================================
