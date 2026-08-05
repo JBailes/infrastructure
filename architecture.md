@@ -122,22 +122,29 @@ internal zone; ACK hosts are still addressed numerically.
 
 ## TLS
 
-Certificates come from Let's Encrypt via the **DNS-01 challenge against
-Cloudflare**, issued on `nginx-proxy`:
+Certificates come from Let's Encrypt via **HTTP-01 through nginx**, issued on
+`nginx-proxy` — the arrangement that has been working, requiring no
+credentials and no third-party DNS:
 
-- `*.bailes.us` + `bailes.us` — one wildcard covering every internal host
-- `ackmud.com`, `rakuensoftware.com`, `rakuensoft.com` and their `www` / `aha` names
+- `bailes.us`, `ackmud.com`, `rakuensoftware.com`, `rakuensoft.com` and their
+  `www` / `aha` names
 
-DNS-01 rather than HTTP-01 for two reasons: a wildcard can only be issued over
-DNS-01, and DNS-01 needs no inbound `:80`, so issuance and renewal keep working
-regardless of port forwarding.
+Renewal is certbot's own timer. HTTP-01 needs inbound `:80` to reach this host,
+which is already how these sites are served.
 
-Every domain issued this way must have its DNS hosted at Cloudflare and be
-covered by the API token in `/etc/letsencrypt/cloudflare.ini`.
+### Internal hosts
 
-A certbot deploy hook pushes the wildcard to the internal services that consume
-it (Grafana on `obs`, the Technitium console on `dns`) after each renewal —
-otherwise the wildcard would only ever live on `nginx-proxy`.
+Internal services (Grafana, the Technitium console) have **no publicly-trusted
+certificate**. Giving them one means a wildcard, and a wildcard can only be
+issued over DNS-01 — which requires moving DNS to a provider with an API
+(these domains are at Namecheap). That is a lot of moving parts for a
+convenience, so it is deliberately not done.
+
+The machinery is present but switched off: uncomment the wildcard entry in
+`CERTS` in `06-setup-nginx-proxy.sh` and drop an API token in
+`secrets/cloudflare.ini` if you ever decide the trade is worth it. A certbot
+deploy hook is already wired to distribute the wildcard to internal consumers,
+and stays inert while no wildcard exists.
 
 ## Provisioning
 

@@ -25,9 +25,8 @@
 # numeric: that network has its own dnsmasq and is not part of the internal
 # zone.
 #
-# TLS uses the DNS-01 challenge via Cloudflare, which yields a *.bailes.us
-# wildcard covering every internal host. A deploy hook pushes that wildcard
-# to the internal services that consume it on each renewal.
+# TLS uses HTTP-01 through nginx -- no credentials, no third-party DNS.
+# DNS-01 and an internal wildcard are supported but switched off; see CERTS.
 
 set -euo pipefail
 
@@ -415,25 +414,26 @@ enable_services() {
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-jbailes@gmail.com}"
 CF_CREDENTIALS="/etc/letsencrypt/cloudflare.ini"
 
-# Certificates to issue: name|comma-separated domains
+# Certificates to issue: name|comma-separated domains|challenge
 #
-# These use the DNS-01 challenge via Cloudflare rather than HTTP-01, for
-# two reasons:
+# HTTP-01 via nginx is the default and needs no credentials -- this is the
+# arrangement that has been working, and it is what runs unless you opt in
+# to something else.
 #
-#   1. A wildcard (*.bailes.us) is only issuable over DNS-01. That single
-#      cert covers every internal host, so services with no inbound path
-#      from the internet still get a real, publicly-trusted certificate.
-#   2. DNS-01 needs no inbound :80, so issuance and renewal keep working
-#      regardless of port forwarding or which host the name points at.
+# challenge:
+#   any   -- HTTP-01 normally; DNS-01 instead if credentials happen to exist
+#   dns   -- DNS-01 only (wildcards). Skipped silently without credentials.
 #
-# Every domain here must therefore have its DNS hosted at Cloudflare and be
-# covered by the API token in cloudflare.ini. A domain hosted elsewhere
-# cannot be issued this way -- see the failure note below.
+# The wildcard entry is commented out deliberately. It would give internal
+# hosts publicly-trusted certs, but it requires moving DNS to a provider with
+# an API (these domains are at Namecheap) -- a lot of moving parts for a
+# convenience. Uncomment it only if you decide that trade is worth making.
 CERTS=(
-    "bailes.us|bailes.us,*.bailes.us"
-    "ackmud.com|ackmud.com,www.ackmud.com,aha.ackmud.com"
-    "rakuensoftware.com|rakuensoftware.com,www.rakuensoftware.com"
-    "rakuensoft.com|rakuensoft.com,www.rakuensoft.com"
+    # "bailes.us-wildcard|bailes.us,*.bailes.us|dns"
+    "bailes.us|bailes.us,www.bailes.us|any"
+    "ackmud.com|ackmud.com,www.ackmud.com,aha.ackmud.com|any"
+    "rakuensoftware.com|rakuensoftware.com,www.rakuensoftware.com|any"
+    "rakuensoft.com|rakuensoft.com,www.rakuensoft.com|any"
 )
 
 # Internal hosts that consume the wildcard. The deploy hook copies it to
@@ -447,14 +447,14 @@ CERT_CONSUMERS=(
 install_cloudflare_credentials() {
     if [[ -f "$CF_CREDENTIALS" ]]; then
         chmod 0600 "$CF_CREDENTIALS"
-        info "Cloudflare credentials already present"
+        info "Cloudflare credentials present -- DNS-01 available"
         return 0
     fi
 
     if [[ -f /root/secrets/cloudflare.ini ]]; then
         install -m 0600 /root/secrets/cloudflare.ini "$CF_CREDENTIALS"
         rm -f /root/secrets/cloudflare.ini
-        info "Installed Cloudflare credentials"
+        info "Installed Cloudflare credentials -- DNS-01 available"
         return 0
     fi
 
@@ -462,46 +462,58 @@ install_cloudflare_credentials() {
 }
 
 obtain_certificates() {
-    info "Obtaining TLS certificates via certbot (DNS-01, Cloudflare)"
-
-    if ! install_cloudflare_credentials; then
-        cat >&2 <<'NOCREDS'
-
-================================================================
-No Cloudflare API credentials found, skipping certificate issuance.
-
-Create an API token with Zone:DNS:Edit on the relevant zones and put it
-in homelab/bootstrap/secrets/cloudflare.ini as:
-
-  dns_cloudflare_api_token = <token>
-
-Then re-run with --deploy-only.
-================================================================
-NOCREDS
-        return 0
+    local have_dns01=0
+    if install_cloudflare_credentials; then
+        have_dns01=1
+    else
+        info "No Cloudflare credentials -- falling back to HTTP-01 where allowed"
     fi
 
-    local failed=0 entry name domains d
+    local failed=0 skipped_wildcard=0 entry name domains challenge d
     local -a args
 
     for entry in "${CERTS[@]}"; do
-        IFS='|' read -r name domains <<< "$entry"
+        IFS='|' read -r name domains challenge <<< "$entry"
+
+        if [[ "$challenge" == "dns" && $have_dns01 -eq 0 ]]; then
+            echo "SKIP: ${name} needs DNS-01 (wildcard) but no Cloudflare credentials" >&2
+            skipped_wildcard=1
+            continue
+        fi
 
         args=()
         while IFS= read -r d; do
             [[ -n "$d" ]] && args+=(-d "$d")
         done < <(tr ',' '\n' <<< "$domains")
 
-        # --keep-until-expiring keeps this idempotent, so re-running does
-        # not burn Let's Encrypt rate limits on still-valid certificates.
-        if certbot certonly --non-interactive --agree-tos \
-            --email "$CERTBOT_EMAIL" \
-            --dns-cloudflare \
-            --dns-cloudflare-credentials "$CF_CREDENTIALS" \
-            --dns-cloudflare-propagation-seconds 30 \
-            --keep-until-expiring \
-            --cert-name "$name" \
-            "${args[@]}"; then
+        # --keep-until-expiring keeps this idempotent, so re-running does not
+        # burn Let's Encrypt rate limits on still-valid certificates.
+        #
+        # rc is captured explicitly: under `set -e` a failing certbot would
+        # otherwise abort the whole script, so one unreachable domain would
+        # stop the remaining certificates from being issued at all.
+        local rc=0
+        if [[ $have_dns01 -eq 1 ]]; then
+            certbot certonly --non-interactive --agree-tos \
+                --email "$CERTBOT_EMAIL" \
+                --dns-cloudflare \
+                --dns-cloudflare-credentials "$CF_CREDENTIALS" \
+                --dns-cloudflare-propagation-seconds 30 \
+                --keep-until-expiring \
+                --cert-name "$name" \
+                "${args[@]}" || rc=$?
+        else
+            # HTTP-01 through the running nginx. Requires :80 to reach this
+            # host from the internet, which is how these sites were issued
+            # before the move to DNS-01.
+            certbot --nginx --non-interactive --agree-tos \
+                --email "$CERTBOT_EMAIL" \
+                --keep-until-expiring \
+                --cert-name "$name" \
+                "${args[@]}" || rc=$?
+        fi
+
+        if [[ $rc -eq 0 ]]; then
             info "Certificate obtained for ${name} (${domains})"
         else
             echo "WARNING: certbot failed for ${name}" >&2
@@ -513,17 +525,19 @@ NOCREDS
     systemctl enable certbot.timer
     systemctl start certbot.timer
 
+    if [[ $skipped_wildcard -eq 1 ]]; then
+        info "Wildcard not issued (optional; needs DNS-01 credentials)"
+    fi
+
     if [[ $failed -eq 1 ]]; then
         cat >&2 <<WARN
 
 ================================================================
 One or more certificate requests failed.
 
-With DNS-01 this is NOT about port forwarding -- it means the zone could
-not be edited with the supplied Cloudflare token. Check that:
-
-  - the domain's DNS is hosted at Cloudflare, and
-  - the token in ${CF_CREDENTIALS} has Zone:DNS:Edit on that zone.
+Over HTTP-01 this usually means :80 is not reachable from the internet
+for that name. Over DNS-01 it means the zone could not be edited with
+the supplied Cloudflare token.
 
 Re-run with --deploy-only once corrected.
 ================================================================
@@ -531,10 +545,6 @@ WARN
     fi
 }
 
-# Distribute the wildcard to internal services after renewal.
-#
-# Without this the wildcard only ever lives on nginx-proxy and every other
-# internal service keeps serving a self-signed certificate.
 install_deploy_hook() {
     info "Installing certificate distribution hook"
 
@@ -557,7 +567,10 @@ set -uo pipefail
 LINEAGE="${RENEWED_LINEAGE:-}"
 HOOKHEAD
 
-        echo "WILDCARD_LINEAGE=\"/etc/letsencrypt/live/${INTERNAL_ZONE}\""
+        # Deliberately the wildcard lineage, not the plain bailes.us one:
+        # without a wildcard there is nothing worth distributing, and this
+        # keeps the hook inert rather than pushing a single-name cert around.
+        echo "WILDCARD_LINEAGE=\"/etc/letsencrypt/live/${INTERNAL_ZONE}-wildcard\""
 
         cat <<'HOOKMID'
 
