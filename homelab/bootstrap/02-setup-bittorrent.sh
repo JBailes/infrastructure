@@ -42,7 +42,7 @@ configure() {
     QBIT_PORT="8080"
     QBIT_EXT_PORT="80"
     QBIT_USER="qbittorrent"
-    APT_CACHE="192.168.1.115"
+    APT_CACHE="${APT_CACHE_IP:-192.168.1.103}"
     APT_CACHE_PORT="3142"
 
     err()  { echo "ERROR: $*" >&2; exit 1; }
@@ -53,14 +53,21 @@ configure() {
     LOCAL_IP=$(ip -4 addr show "$LAN_IFACE" | awk '/inet / {sub(/\/.*/, "", $2); print $2; exit}')
 
     # -- apt proxy
+    # Use the apt cache only if it answers. A cache is an optimisation, not
+    # a dependency: a host must still build when apt-cache is down or has not
+    # been created yet.
     configure_apt_proxy() {
-        info "Configuring apt proxy (apt-cache at ${APT_CACHE}:${APT_CACHE_PORT})"
-        cat > /etc/apt/apt.conf.d/01proxy <<APTPROXY
+        mkdir -p /etc/apt/apt.conf.d
+        rm -f /etc/apt/apt.conf.d/01proxy
+
+        if timeout 3 bash -c "exec 3<>/dev/tcp/${APT_CACHE}/${APT_CACHE_PORT}" 2>/dev/null; then
+            info "Using apt cache at ${APT_CACHE}:${APT_CACHE_PORT}"
+            cat > /etc/apt/apt.conf.d/01proxy <<APTPROXY
 Acquire::http::Proxy "http://${APT_CACHE}:${APT_CACHE_PORT}";
-Acquire::https::Proxy "http://${APT_CACHE}:${APT_CACHE_PORT}";
-Acquire::http::Proxy::Fallback "DIRECT";
-Acquire::https::Proxy::Fallback "DIRECT";
 APTPROXY
+        else
+            info "apt cache unreachable at ${APT_CACHE}:${APT_CACHE_PORT}, fetching directly"
+        fi
     }
 
     # -- Packages

@@ -35,7 +35,10 @@ configure() {
 
     rm -f /root/.env.bootstrap
 
-    EXTERNAL_IP="192.168.1.115"
+    # Derived, not hardcoded: the LAN address follows the CTID, so pinning it
+    # here just produces a banner that lies after a renumber.
+    EXTERNAL_IP="$(ip -4 -o addr show dev eth0 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}')"
+    EXTERNAL_IP="${EXTERNAL_IP:-unknown}"
     ACK_IP="10.1.0.115"
     ACK_NET="10.1.0.0/24"
     LAN_NET="192.168.0.0/23"

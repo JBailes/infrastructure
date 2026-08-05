@@ -26,8 +26,12 @@ _LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/nu
 CTID="${CTID_PERSONAL_WEB:-106}"
 HOSTNAME="personal-web"
 LAN_IP="192.168.1.${CTID}"
-RAM=256
-CORES=1
+# Sized for the build, not the running site. Like rakuen-web this runs
+# `npm install` and a production build inside the container; at 256MB the
+# package install alone is OOM-killed ("dpkg --set-selections received
+# signal 9"). The running footprint afterwards is just `serve`.
+RAM=1024
+CORES=2
 DISK=4
 PRIVILEGED="no"
 

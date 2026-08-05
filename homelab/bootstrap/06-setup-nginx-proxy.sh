@@ -52,7 +52,11 @@ CTID="${CTID_NGINX_PROXY:-105}"
 HOSTNAME="nginx-proxy"
 LAN_IP="192.168.1.${CTID}"
 ACK_IP="10.1.0.118"
-RAM=256
+# 256MB was enough for nginx + certbot alone, but the dns-cloudflare plugin
+# pulls in a sizeable Python dependency chain and the package install is
+# OOM-killed ("dpkg --set-selections received signal 9"). Running footprint
+# is still small.
+RAM=512
 CORES=1
 DISK=4
 PRIVILEGED="no"

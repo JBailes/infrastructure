@@ -177,6 +177,51 @@ create_lxc() {
     fi
 }
 
+# Register a host's A record in the internal zone.
+#
+# Called from the Proxmox host after a container is built, so a host appears
+# in DNS without anyone remembering to add it. The automation token lives on
+# the dns host itself. Safe to re-run: records are written with
+# overwrite=true, so this doubles as a repair.
+#
+# Never fatal: a missing DNS record should not fail a build that otherwise
+# succeeded, and the record can be re-asserted later.
+# Usage: register_dns <hostname> <ip>
+register_dns() {
+    local name="${1:?Usage: register_dns <hostname> <ip>}"
+    local ip="${2:?Usage: register_dns <hostname> <ip>}"
+
+    local dns_ctid token response
+    dns_ctid=$(resolve_ctid dns) || dns_ctid="$CTID_DNS"
+
+    if ! pct status "$dns_ctid" 2>/dev/null | grep -q running; then
+        warn "dns host not running, skipping DNS registration for ${name}"
+        return 0
+    fi
+
+    token=$(pct exec "$dns_ctid" -- cat /etc/dns-api-token 2>/dev/null) || true
+    if [[ -z "$token" ]]; then
+        warn "no DNS API token available, skipping registration for ${name}"
+        return 0
+    fi
+
+    response=$(curl -sf -G "http://${DNS_IP}:5380/api/zones/records/add" \
+        --data-urlencode "token=${token}" \
+        --data-urlencode "zone=${INTERNAL_ZONE}" \
+        --data-urlencode "domain=${name}.${INTERNAL_ZONE}" \
+        --data-urlencode "type=A" \
+        --data-urlencode "ipAddress=${ip}" \
+        --data-urlencode "ttl=300" \
+        --data-urlencode "overwrite=true" 2>/dev/null) || true
+
+    # A non-ok status still returns HTTP 200, so inspect the body.
+    if grep -q '"status":"ok"' <<< "${response:-}"; then
+        info "Registered ${name}.${INTERNAL_ZONE} -> ${ip}"
+    else
+        warn "DNS registration failed for ${name}: ${response:-no response}"
+    fi
+}
+
 # Push a script into a running CT and execute it with --configure.
 # Usage: deploy_script <ctid> <local_script_path>
 deploy_script() {

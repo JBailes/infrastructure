@@ -57,10 +57,23 @@ configure() {
     [[ $EUID -eq 0 ]] || err "Run as root"
     [[ -n "$ADMIN_PASSWORD" ]] || err "DNS_ADMIN_PASSWORD must be set (do not ship a default admin password)"
 
+    # Use the apt cache only if it actually answers.
+    #
+    # dns is the first host brought up on a cold rebuild, so apt-cache may not
+    # exist yet. Pointing at a dead proxy makes every package fetch fail with
+    # "no route to host" -- the resolver cannot be installed because the cache
+    # it does not need is missing.
     configure_apt_proxy() {
-        info "Configuring apt proxy"
         mkdir -p /etc/apt/apt.conf.d
-        echo "Acquire::http::Proxy \"http://${APT_CACHE_IP}:3142\";" > /etc/apt/apt.conf.d/01proxy
+        rm -f /etc/apt/apt.conf.d/01proxy
+
+        if timeout 3 bash -c "exec 3<>/dev/tcp/${APT_CACHE_IP}/3142" 2>/dev/null; then
+            info "Using apt cache at ${APT_CACHE_IP}:3142"
+            echo "Acquire::http::Proxy \"http://${APT_CACHE_IP}:3142\";" \
+                > /etc/apt/apt.conf.d/01proxy
+        else
+            info "apt cache unreachable at ${APT_CACHE_IP}:3142, fetching directly"
+        fi
     }
 
     # Technitium binds :53. systemd-resolved must be out of the way first.
@@ -133,6 +146,7 @@ EOF
                 --data-urlencode "pass=${pass}" 2>/dev/null) || continue
             if [[ "$(echo "$response" | jq -r '.status // "error"')" == "ok" ]]; then
                 TOKEN=$(echo "$response" | jq -r '.token')
+                CURRENT_PASSWORD="$pass"
                 [[ "$pass" == "admin" ]] && CHANGE_PASSWORD=1
                 return 0
             fi
@@ -143,9 +157,13 @@ EOF
     secure_admin() {
         if [[ "${CHANGE_PASSWORD:-0}" == "1" ]]; then
             info "Changing the default admin password"
+            # Both parameters are required: 'pass' is the CURRENT password and
+            # 'newPass' the replacement. Sending either alone fails with the
+            # other reported missing.
             api "user/changePassword" \
                 --data-urlencode "token=${TOKEN}" \
-                --data-urlencode "pass=${ADMIN_PASSWORD}" >/dev/null
+                --data-urlencode "pass=${CURRENT_PASSWORD}" \
+                --data-urlencode "newPass=${ADMIN_PASSWORD}" >/dev/null
         fi
     }
 
