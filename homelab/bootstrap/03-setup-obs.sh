@@ -34,9 +34,9 @@ _LIB="$(dirname "$0")/lib/common.sh"; [[ -f "$_LIB" ]] || _LIB="/root/lib/common
 # Container specification
 # ---------------------------------------------------------------------------
 
-CTID=100
+CTID="${CTID_OBS:-104}"
 HOSTNAME="obs"
-LAN_IP="192.168.1.100"
+LAN_IP="192.168.1.${CTID}"
 ACK_IP="10.1.0.100"
 RAM=2048
 CORES=2
@@ -860,7 +860,7 @@ configure_dns_ntp() {
     # host is down.
     cat > /etc/resolv.conf <<RESOLV
 search ${INTERNAL_ZONE}
-nameserver ${DNS_IP:-192.168.1.149}
+nameserver ${DNS_IP:-192.168.1.101}
 nameserver ${ROUTER_GW:-192.168.1.1}
 RESOLV
     info "DNS set to the internal resolver, router as fallback"

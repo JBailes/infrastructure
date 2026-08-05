@@ -327,7 +327,7 @@ host_main() {
     source "$SCRIPT_DIR/lib/common.sh"
     [[ $EUID -eq 0 ]] || err "Run as root"
 
-    local ctid=116
+    local ctid="$CTID_BITTORRENT"
     local hostname="bittorrent"
     local ip="192.168.1.${ctid}"
     local deploy_only=0

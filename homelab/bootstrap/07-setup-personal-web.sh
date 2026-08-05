@@ -23,9 +23,9 @@ _LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/nu
 # Container specification
 # ---------------------------------------------------------------------------
 
-CTID=117
+CTID="${CTID_PERSONAL_WEB:-106}"
 HOSTNAME="personal-web"
-LAN_IP="192.168.1.117"
+LAN_IP="192.168.1.${CTID}"
 RAM=256
 CORES=1
 DISK=4

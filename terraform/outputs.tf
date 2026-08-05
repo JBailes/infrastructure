@@ -10,11 +10,20 @@ output "hosts" {
 }
 
 output "dns_host" {
-  description = "The internal resolver. Pinned, because it is the bootstrap floor."
+  description = "The internal resolver -- first in host_order, so its address is predictable."
   value = {
-    ctid = var.dns_ctid
+    ctid = local.ctids["dns"]
     ip   = local.dns_ip
     fqdn = "dns.${var.internal_zone}"
+  }
+}
+
+output "vpn_gateway" {
+  description = "The VPN gateway VM. Created by 01-setup-vpn-gateway.sh, registered in DNS here."
+  value = {
+    ctid = local.vpn_gateway_ctid
+    ip   = local.vpn_gateway_ip
+    fqdn = "vpn-gateway.${var.internal_zone}"
   }
 }
 
@@ -32,7 +41,7 @@ resource "local_file" "bootstrap_env" {
     # host is reached by name through it.
     INTERNAL_ZONE="${var.internal_zone}"
     DNS_IP="${local.dns_ip}"
-    DNS_CTID="${var.dns_ctid}"
+    DNS_CTID="${local.ctids["dns"]}"
     ROUTER_GW="${var.router_gw}"
   EOT
 }

@@ -13,27 +13,33 @@ Terraform would trade working code for churn.
 
 ## Addressing model
 
-CTIDs are **allocated randomly**, and a host's address is
-`192.168.1.<CTID>`. Addresses are an output of provisioning, not an input.
-That is the whole reason the internal DNS zone exists — nothing should refer
-to these hosts by number.
+CTIDs are assigned **sequentially**, and a host's address is
+`192.168.1.<CTID>` — the CTID *is* the address. Services still refer to each
+other by name through the internal DNS zone, so renumbering a host does not
+mean editing config all over the place.
 
-Allocation is one independent `random_integer` per host, keyed on the host
-name, so adding or removing a host never disturbs the CTIDs (and therefore the
-IPs) of the others. Shuffling a shared pool would reassign everything whenever
-the host set changed, recreating every container.
+CTIDs are assigned **sequentially** from `ctid_start` (101) in `host_order`,
+skipping `reserved_ctids`. The current assignment:
 
-The tradeoff: independent draws can collide. A `precondition` turns a collision
-into a loud plan-time failure rather than two containers silently fighting over
-one ID. If it fires:
+| CTID | Host | | CTID | Host |
+|---|---|---|---|---|
+| 101 | dns | | 106 | personal-web |
+| 103 | apt-cache | | 107 | rakuen-web |
+| 104 | obs | | 108 | bittorrent |
+| 105 | nginx-proxy | | 109 | deploy |
+| | | | 110 | vpn-gateway (VM) |
 
-```bash
-terraform apply -var 'ctid_salt={"obs"=1}'
-```
+`102` is skipped — it belongs to the unifi controller, which is not managed
+here. `dns` is simply first, so its address is predictable without needing a
+special pin.
 
-`dns` is the one pinned host (`.149`, just below the `150-239` pool). It is the
-bootstrap floor — every other container needs a predictable address to point
-`--nameserver` at before name resolution exists.
+**Order matters.** Append new hosts to the end of `host_order`; inserting into
+the middle renumbers everything after it, and since the CTID *is* the address,
+that means recreating those containers.
+
+This must stay in step with the `CTID_*` block in
+`../homelab/bootstrap/lib/common.sh`, which the bash scripts use when Terraform
+is not involved.
 
 ## Usage
 

@@ -17,5 +17,6 @@ dns_api_token = ""
 
 ssh_public_key = "ssh-ed25519 AAAA... you@example.com"
 
-# Only needed to break a CTID collision, which the plan will tell you about:
-#   ctid_salt = { obs = 1 }
+# CTIDs are sequential from here, skipping reserved_ctids.
+# ctid_start     = 101
+# reserved_ctids = [100, 102, 130, 131, 132, 140]

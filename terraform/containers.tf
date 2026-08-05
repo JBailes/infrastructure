@@ -28,6 +28,18 @@ resource "proxmox_virtual_environment_container" "host" {
       }
     }
 
+    # Second ip_config binds to the second network_interface, in order.
+    # The ACK addresses are fixed, not derived from the CTID: ack-gateway's
+    # dnsmasq has static entries for them and that network is not renumbered.
+    dynamic "ip_config" {
+      for_each = each.value.ack_homed ? [1] : []
+      content {
+        ipv4 {
+          address = "${each.value.ack_ip}/24"
+        }
+      }
+    }
+
     # Point every guest at the internal resolver so the bootstrap scripts can
     # address each other by name.
     dns {
@@ -87,7 +99,4 @@ resource "proxmox_virtual_environment_container" "host" {
   }
 }
 
-locals {
-  # The VPN gateway is a VM managed outside this module (see below).
-  vpn_gateway_ip = "${var.lan_prefix}.104"
-}
+# vpn_gateway_ip is defined in hosts.tf, where its CTID is allocated.

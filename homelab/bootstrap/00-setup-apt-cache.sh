@@ -40,7 +40,7 @@ configure() {
     ACK_NET="10.1.0.0/24"
     LAN_NET="192.168.0.0/23"
     CACHE_PORT="3142"
-    DNS_IP="192.168.1.149"
+    DNS_IP="192.168.1.101"
     INTERNAL_ZONE="bailes.us"
 
     [[ $EUID -eq 0 ]] || err "Run as root"
@@ -213,7 +213,7 @@ host_main() {
     source "$SCRIPT_DIR/lib/common.sh"
     [[ $EUID -eq 0 ]] || err "Run as root"
 
-    local ctid=115
+    local ctid="$CTID_APT_CACHE"
     local hostname="apt-cache"
     local ip="192.168.1.${ctid}"
     local deploy_only=0

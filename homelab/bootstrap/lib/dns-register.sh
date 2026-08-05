@@ -20,7 +20,7 @@ err()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
 
 INTERNAL_ZONE="${INTERNAL_ZONE:-bailes.us}"
-DNS_SERVER="${DNS_SERVER:-192.168.1.149}"
+DNS_SERVER="${DNS_SERVER:-192.168.1.101}"
 TOKEN_FILE="${DNS_TOKEN_FILE:-/etc/dns-api-token}"
 
 name="" ip=""

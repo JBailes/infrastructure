@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # 06-setup-nginx-proxy.sh -- Create and configure the nginx reverse proxy LXC
 #
-# Runs on: the Proxmox host (creates CT 118, then configures it)
+# Runs on: the Proxmox host (creates the CT, then configures it)
 #
 # Usage:
 #   ./06-setup-nginx-proxy.sh               # Create CT and configure
 #   ./06-setup-nginx-proxy.sh --deploy-only  # Re-run configuration on existing CT
 #   ./06-setup-nginx-proxy.sh --configure    # (internal) Run inside the container
 #
-# Creates a Debian 13 LXC (CT 118) dual-homed:
-#   eth0 = 192.168.1.118/23 on vmbr0 (LAN, incoming HTTPS from router)
+# Creates a Debian 13 LXC dual-homed:
+#   eth0 = 192.168.1.<CTID>/23 on vmbr0 (LAN, incoming HTTPS from router)
 #   eth1 = 10.1.0.118/24 on vmbr2 (ACK, reach ack-web)
+#
+# The LAN address follows the CTID. The ACK address does not: ack-gateway's
+# dnsmasq has a static entry for 10.1.0.118 and that network is not being
+# renumbered.
 #
 # Central nginx reverse proxy for all web sites. Handles TLS termination
 # and routes by Host header to the appropriate backend:
@@ -20,8 +24,8 @@
 #   rakuensoftware.com -> rakuen-web.bailes.us:3000
 #   rakuensoft.com  -> redirect to rakuensoftware.com
 #
-# LAN backends are addressed by name through the internal resolver, because
-# CTIDs (and therefore IPs) are allocated dynamically. ACK backends stay
+# LAN backends are addressed by name through the internal resolver, so
+# renumbering a host does not require editing this config. ACK backends stay
 # numeric: that network has its own dnsmasq and is not part of the internal
 # zone.
 #
@@ -37,16 +41,16 @@ _LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/nu
 # values common.sh would supply need defaults here too. Host-side runs get
 # them from common.sh (and therefore from terraform.env when present).
 INTERNAL_ZONE="${INTERNAL_ZONE:-bailes.us}"
-DNS_IP="${DNS_IP:-192.168.1.149}"
+DNS_IP="${DNS_IP:-192.168.1.101}"
 ROUTER_GW="${ROUTER_GW:-192.168.1.1}"
 
 # ---------------------------------------------------------------------------
 # Container specification
 # ---------------------------------------------------------------------------
 
-CTID=118
+CTID="${CTID_NGINX_PROXY:-105}"
 HOSTNAME="nginx-proxy"
-LAN_IP="192.168.1.118"
+LAN_IP="192.168.1.${CTID}"
 ACK_IP="10.1.0.118"
 RAM=256
 CORES=1
@@ -114,9 +118,9 @@ Routing:
 Caching proxy:
   :8080 -> dotnetcli.azureedge.net (cached .NET SDK/runtime downloads)
 
-TLS: DNS-01 via Cloudflare. Renewal via certbot.timer.
-Certificates: *.${INTERNAL_ZONE} (wildcard, internal) plus the public sites.
-The wildcard is pushed to internal consumers by the certbot deploy hook.
+TLS: HTTP-01 through nginx. Renewal via certbot.timer.
+Certificates: the public sites only. Internal hosts have no public cert;
+see CERTS if you ever want a wildcard.
 ================================================================
 EOF
 }

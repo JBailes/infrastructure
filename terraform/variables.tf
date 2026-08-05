@@ -81,42 +81,34 @@ variable "internal_zone" {
 
 # --- CTID allocation -------------------------------------------------------
 #
-# CTIDs are allocated randomly rather than hand-assigned, and a host's IP is
-# derived from its CTID (<lan_prefix>.<ctid>). The range must therefore stay
-# inside the LAN's usable host range and clear of anything not managed here.
+# CTIDs are assigned sequentially from ctid_start in host_order (see
+# hosts.tf), skipping reserved_ctids. A host's address is
+# <lan_prefix>.<CTID>, so the CTID *is* the address -- renumbering a host
+# moves it.
 
-variable "ctid_range_min" {
-  description = "Lowest CTID that may be allocated"
+variable "ctid_start" {
+  description = "First CTID to assign. Assignment walks upward from here."
   type        = number
-  default     = 150
-}
-
-variable "ctid_range_max" {
-  description = "Highest CTID that may be allocated. Keep below the ACK range (240-254)."
-  type        = number
-  default     = 239
+  default     = 101
 
   validation {
-    condition     = var.ctid_range_max < 240
-    error_message = "ctid_range_max must stay below 240; 240-254 belongs to the ACK network."
+    condition     = var.ctid_start > 0 && var.ctid_start < 240
+    error_message = "ctid_start must be below 240; 240-254 belongs to the ACK network."
   }
 }
 
-variable "dns_ctid" {
+variable "reserved_ctids" {
   description = <<-EOT
-    CTID for the dns host. This one is pinned rather than random: it is the
-    bootstrap floor, so every other host needs a predictable address to point
-    --nameserver at before name resolution exists. Must be outside
-    [ctid_range_min, ctid_range_max] so it can never collide with an
-    allocated one.
-  EOT
-  type        = number
-  default     = 149
+    CTIDs that must never be assigned, because something not managed here
+    already owns them. The address is taken as well as the ID, since one
+    implies the other.
 
-  validation {
-    condition     = var.dns_ctid > 0 && var.dns_ctid < 255
-    error_message = "dns_ctid must be a valid last octet (1-254)."
-  }
+      100  code (this container)
+      102  unifi controller
+      130-140, 260+  the aimee fleet
+  EOT
+  type        = list(number)
+  default     = [100, 102, 130, 131, 132, 140]
 }
 
 # --- DNS registration ------------------------------------------------------

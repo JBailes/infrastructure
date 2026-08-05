@@ -40,19 +40,46 @@ _TF_ENV="$(dirname "${BASH_SOURCE[0]}")/terraform.env"
 
 INTERNAL_ZONE="${INTERNAL_ZONE:-bailes.us}"
 
+# ---------------------------------------------------------------------------
+# CTID assignment -- sequential from 101, IP is always 192.168.1.<CTID>
+# ---------------------------------------------------------------------------
+#
+# Assigned densely in bootstrap order. 102 is skipped because it belongs to
+# the unifi controller, which is not managed here. These are the single
+# source of truth: no script hardcodes its own CTID.
+#
+# Changing one of these renumbers a host, which means destroying and
+# recreating it -- the IP moves with the CTID by definition.
+
+CTID_DNS=101
+# 102 = unifi (not managed here)
+CTID_APT_CACHE=103
+CTID_OBS=104
+CTID_NGINX_PROXY=105
+CTID_PERSONAL_WEB=106
+CTID_RAKUEN_WEB=107
+CTID_BITTORRENT=108
+CTID_DEPLOY=109
+VPN_GATEWAY_VMID=110
+
+# A host's address follows from its CTID.
+host_ip() { echo "192.168.1.${1:?Usage: host_ip <ctid>}"; }
+
 DNS_HOST="dns.${INTERNAL_ZONE}"
-DNS_IP="${DNS_IP:-192.168.1.149}"
-DNS_VMID="${DNS_CTID:-149}"
+DNS_IP="${DNS_IP:-192.168.1.${CTID_DNS}}"
+DNS_CTID="${DNS_CTID:-$CTID_DNS}"
 
 APT_CACHE_HOST="apt-cache.${INTERNAL_ZONE}"
-APT_CACHE_IP="192.168.1.115"
+APT_CACHE_IP="192.168.1.${CTID_APT_CACHE}"
 APT_CACHE_PORT=3142
 
 OBS_HOST="obs.${INTERNAL_ZONE}"
-OBS_IP="192.168.1.100"
+OBS_IP="192.168.1.${CTID_OBS}"
 
 NGINX_PROXY_HOST="nginx-proxy.${INTERNAL_ZONE}"
-NGINX_PROXY_IP="192.168.1.118"
+NGINX_PROXY_IP="192.168.1.${CTID_NGINX_PROXY}"
+
+VPN_GATEWAY_IP="192.168.1.${VPN_GATEWAY_VMID}"
 
 # Resolve a hostname to an IP using the internal DNS server explicitly.
 # Falls back to the caller-supplied bootstrap IP when DNS is not up yet, so
@@ -75,9 +102,6 @@ resolve_host() {
 # CTID allocation and resolution
 # ---------------------------------------------------------------------------
 
-CTID_RANGE_START=100
-VPN_GATEWAY_VMID=104
-VPN_GATEWAY_IP="192.168.1.104"
 VPN_GATEWAY_HOST="vpn-gateway.${INTERNAL_ZONE}"
 CLOUD_IMAGE_FILENAME="debian-13-genericcloud-amd64.qcow2"
 CLOUD_IMAGE_URL="https://cloud.debian.org/images/cloud/trixie/latest/${CLOUD_IMAGE_FILENAME}"

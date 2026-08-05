@@ -50,7 +50,7 @@ configure() {
     INTERNAL_ZONE="${INTERNAL_ZONE:-bailes.us}"
     ROUTER_GW="${ROUTER_GW:-192.168.1.1}"
     APT_CACHE_IP="${APT_CACHE_IP:-192.168.1.115}"
-    DNS_IP="${DNS_IP:-192.168.1.149}"
+    DNS_IP="${DNS_IP:-192.168.1.101}"
     ADMIN_PASSWORD="${DNS_ADMIN_PASSWORD:-}"
     API="http://127.0.0.1:5380/api"
 
@@ -289,7 +289,7 @@ host_main() {
         # The DNS host is the bootstrap floor: everything else finds it by IP
         # before name resolution exists, so its CTID is pinned rather than
         # allocated dynamically like the other hosts.
-        ctid="$DNS_VMID"
+        ctid="$DNS_CTID"
         ip="$DNS_IP"
         if create_lxc "$ctid" "$hostname" "$ip" 1024 2 8 "$ROUTER_GW" "no"; then
             pct set "$ctid" --onboot 1

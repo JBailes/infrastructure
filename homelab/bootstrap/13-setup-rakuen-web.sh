@@ -27,9 +27,9 @@ _LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/nu
 # Container specification
 # ---------------------------------------------------------------------------
 
-CTID=121
+CTID="${CTID_RAKUEN_WEB:-107}"
 HOSTNAME="rakuen-web"
-LAN_IP="192.168.1.121"
+LAN_IP="192.168.1.${CTID}"
 # Deliberately larger than personal-web (256MB/1core/4GB): this site runs
 # `npm install` and a Vite production build inside the container, which OOMs
 # at 256MB. The running footprint afterwards is still just `serve`.

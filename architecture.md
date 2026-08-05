@@ -85,20 +85,33 @@ dual-homed. `vmbr1` and `vmbr3` are gone with the WOL infrastructure.
 
 Hosts are addressed **by name**, not by IP.
 
-CTIDs are allocated dynamically by Terraform, and a host's address is
-`192.168.1.<CTID>`. Addresses are therefore an *output* of provisioning, not
-an input to it, and anything that hardcodes one goes stale the first time a
-host is rebuilt. The internal DNS zone exists precisely so nothing has to.
+CTIDs are assigned **sequentially from 101**, and a host's address is
+`192.168.1.<CTID>` — the CTID *is* the address. Services still refer to each
+other by name, so renumbering a host does not mean editing config across the
+estate.
 
-The one exception is the `dns` host itself at `192.168.1.149`. It is the
-bootstrap floor: every other container needs a predictable address to point
-`--nameserver` at before name resolution exists. Its CTID is pinned and sits
-just below the allocation pool (150-239) so it can never collide with an
-allocated one.
+| CTID | Host | | CTID | Host |
+|---|---|---|---|---|
+| 101 | dns | | 106 | personal-web |
+| *102* | *unifi (not managed here)* | | 107 | rakuen-web |
+| 103 | apt-cache | | 108 | bittorrent |
+| 104 | obs | | 109 | deploy |
+| 105 | nginx-proxy | | 110 | vpn-gateway (VM) |
 
-`192.168.1.149` is the only address the bash bootstrap needs to know. Terraform
-writes it to `homelab/bootstrap/lib/terraform.env`, which `lib/common.sh`
-sources, so the two cannot drift.
+`dns` is first, so `192.168.1.101` is predictable — which matters because it is
+the bootstrap floor: every other container needs somewhere to point
+`--nameserver` before name resolution exists. It is the only address the bash
+bootstrap needs to know.
+
+The assignment lives in the `CTID_*` block of `homelab/bootstrap/lib/common.sh`
+and in `host_order` in `terraform/hosts.tf`; those two must agree. Terraform
+also writes the resolver's address to `homelab/bootstrap/lib/terraform.env`,
+which `lib/common.sh` sources.
+
+**ACK-side addresses are not renumbered.** Hosts that also sit on `vmbr2` keep
+their existing `10.1.0.x` addresses (`obs` .100, `deploy` .101, `apt-cache`
+.115, `nginx-proxy` .118), because `ack-gateway`'s dnsmasq has static entries
+for them and that network is deliberately left alone.
 
 ## DNS (split horizon)
 
