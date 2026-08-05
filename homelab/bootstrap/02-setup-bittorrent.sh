@@ -33,7 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ===================================================================
 
 configure() {
-    VPN_GATEWAY="${VPN_GATEWAY_IP:-192.168.1.110}"
+    VPN_GATEWAY="${VPN_GATEWAY_IP:-192.168.1.111}"
     NAS_HOST="192.168.1.254"
     # The NAS exports /mnt/media/storage (to *), not /mnt/data/storage --
     # the old path simply does not exist there, so the mount failed with
@@ -326,15 +326,40 @@ SERVICE
     setup_watchdog() {
         info "Installing VPN watchdog"
 
+        # The expected gateway lives in a config file rather than being baked
+        # into the script below. The heredoc is quoted so the watchdog is
+        # written verbatim, which previously forced the address to be repeated
+        # here AND inside it -- and the two drifted the moment the gateway
+        # moved, so the watchdog stopped qBittorrent for a gateway that had
+        # simply been renumbered.
+        cat > /etc/vpn-watchdog.conf <<WDCONF
+# Managed by 02-setup-bittorrent.sh
+VPN_GATEWAY="${VPN_GATEWAY}"
+WDCONF
+
         cat > /usr/local/bin/vpn-watchdog.sh <<'WATCHDOG'
 #!/usr/bin/env bash
 # VPN watchdog: stop qBittorrent if traffic would not go through VPN gateway
 
-VPN_GATEWAY="192.168.1.110"
+CONF=/etc/vpn-watchdog.conf
 SERVICE="qbittorrent-nox"
 LOGFILE="/var/log/vpn-watchdog.log"
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOGFILE"; }
+
+# Fail loudly rather than guessing: without the expected gateway this cannot
+# tell a correct route from a wrong one, and silently assuming either way is
+# worse than stopping to say so.
+if [[ ! -r "$CONF" ]]; then
+    log "ERROR: $CONF missing; cannot verify the gateway"
+    exit 1
+fi
+# shellcheck source=/dev/null
+source "$CONF"
+if [[ -z "${VPN_GATEWAY:-}" ]]; then
+    log "ERROR: VPN_GATEWAY not set in $CONF"
+    exit 1
+fi
 
 default_gw=$(ip route show default | awk '/^default/ {for (i=1; i<=NF; i++) if ($i=="via") {print $(i+1); exit}}')
 if [[ "$default_gw" != "$VPN_GATEWAY" ]]; then
