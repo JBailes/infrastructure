@@ -24,6 +24,16 @@
 # Why a VM (not LXC): LXC containers share the host kernel's network
 # namespace, which prevents iptables FORWARD from receiving transit traffic.
 # A VM has its own kernel, so IP forwarding works correctly.
+#
+# Self-healing (four layers, see setup_selfheal):
+#   1. systemd Restart=always    -- the openvpn process dies
+#   2. OpenVPN ping-restart 60   -- the peer stops responding
+#   3. vpn-healthcheck.timer     -- tunnel looks up but no traffic passes
+#   4. reboot                    -- restarts are not restoring the tunnel
+#
+# Layer 3 exists because "tun0 is up" is not evidence of a working tunnel:
+# persist-tun keeps the interface alive across failures, so the watchdog
+# sends real packets out tun0 instead of checking interface state.
 
 set -euo pipefail
 
@@ -87,7 +97,8 @@ APTPROXY
         info "Installing packages"
         apt-get update -qq
         DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            openvpn iptables iptables-persistent dnsmasq curl ca-certificates qemu-guest-agent
+            openvpn iptables iptables-persistent dnsmasq curl ca-certificates qemu-guest-agent \
+            prometheus-node-exporter iputils-ping
         systemctl enable --now qemu-guest-agent
     }
 
@@ -204,6 +215,8 @@ SYSCTL
         iptables -A INPUT -i "$LAN_IFACE" -p udp --dport 53 -j ACCEPT
         iptables -A INPUT -i "$LAN_IFACE" -p tcp --dport 53 -j ACCEPT
         iptables -A INPUT -i "$LAN_IFACE" -p icmp -j ACCEPT
+        # node_exporter: lets obs scrape tunnel health from the watchdog
+        iptables -A INPUT -i "$LAN_IFACE" -p tcp --dport 9100 -j ACCEPT
 
         # --- FORWARD rules (kill switch) ---
         iptables -A FORWARD -i "$LAN_IFACE" -o "$VPN_IFACE" -j ACCEPT
@@ -252,6 +265,18 @@ DNS
         info "dnsmasq configured: listening on $LAN_IFACE, forwarding to VPN DNS"
     }
 
+    # -- Self-healing: installed from lib/vpn-selfheal.sh
+    #
+    # The policy lives in one file so the bootstrap and the standalone repair
+    # path cannot drift apart. host_main pushes it to /root/vpn-selfheal.sh
+    # before calling --configure.
+    setup_selfheal() {
+        info "Installing VPN self-healing"
+        [[ -x /root/vpn-selfheal.sh ]] \
+            || err "/root/vpn-selfheal.sh not found -- host_main should have pushed it"
+        /root/vpn-selfheal.sh
+    }
+
     # -- Enable and start OpenVPN
     start_openvpn() {
         info "Enabling and starting OpenVPN"
@@ -292,6 +317,24 @@ DNS
         forward_rules=$(iptables -L FORWARD -nv 2>/dev/null | grep -c "$VPN_IFACE" || true)
         [[ "$forward_rules" -ge 1 ]] || err "Kill switch rules not found in FORWARD chain"
 
+        # -- Self-healing must actually be armed, not just installed
+        systemctl is-active --quiet vpn-healthcheck.timer \
+            || err "vpn-healthcheck.timer is not active -- self-healing is NOT armed"
+
+        systemctl show openvpn@client -p Restart | grep -q 'Restart=always' \
+            || err "openvpn@client is not set to Restart=always -- self-healing is NOT armed"
+
+        grep -q '^ping-restart 60$' /etc/openvpn/client.conf \
+            || err "ping-restart not set -- OpenVPN will not reconnect on a dead tunnel"
+
+        # Prove the probe works end to end rather than assuming it does.
+        /usr/local/bin/vpn-healthcheck.sh >/dev/null 2>&1 || true
+        if grep -qx 'vpn_gateway_tunnel_up 1' /var/lib/prometheus/node-exporter/vpn_gateway.prom 2>/dev/null; then
+            info "Watchdog probe succeeded: traffic is flowing through $VPN_IFACE"
+        else
+            echo "WARNING: watchdog did not report a healthy tunnel. Check: journalctl -t vpn-healthcheck" >&2
+        fi
+
         info "Verification passed"
     }
 
@@ -306,6 +349,7 @@ DNS
     setup_firewall
     setup_dnsmasq
     start_openvpn
+    setup_selfheal
     verify
 
     cat <<EOF
@@ -317,6 +361,12 @@ VPN:         $VPN_REMOTE:$VPN_PORT/$VPN_PROTO
 Kill switch: Active (FORWARD only through tun0, DROP if tunnel down)
 DNS:         dnsmasq on 192.168.1.104:53 (forwarding to VPN DNS)
 apt proxy:   ${APT_CACHE}:${APT_CACHE_PORT}
+Self-heal:   Restart=always + ping-restart 60 + watchdog every 30s
+             (3 failed probes -> restart, 3 failed restarts -> reboot)
+Metrics:     node_exporter :9100, vpn_gateway_tunnel_up
+
+Watchdog logs:  journalctl -t vpn-healthcheck -f
+Watchdog state: systemctl list-timers vpn-healthcheck.timer
 
 To use: set a device's default gateway and DNS to 192.168.1.104.
 To stop: set the device's gateway and DNS back to 192.168.1.1.
@@ -369,6 +419,13 @@ host_main() {
     else
         err "secrets/ directory not found at $SCRIPT_DIR/secrets (need client.ovpn and auth.txt)"
     fi
+
+    # Self-healing policy lives in lib/vpn-selfheal.sh; push it alongside so
+    # --configure can invoke it instead of carrying its own copy.
+    # shellcheck disable=SC2086
+    scp $VM_SSH_OPTS "$SCRIPT_DIR/lib/vpn-selfheal.sh" "root@${ip}:/root/vpn-selfheal.sh"
+    # shellcheck disable=SC2086
+    ssh $VM_SSH_OPTS "root@${ip}" "chmod 0755 /root/vpn-selfheal.sh"
 
     info "Deploying $hostname configuration (VM $vmid)"
     deploy_script_vm "$ip" "$SCRIPT_DIR/01-setup-vpn-gateway.sh"

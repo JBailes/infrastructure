@@ -227,6 +227,7 @@ install_service() {
 [Unit]
 Description=ACK Historical Archive web app
 After=network.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple

@@ -193,6 +193,7 @@ install_service() {
 [Unit]
 Description=TNG DB API (read-only game content)
 After=network.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=exec
@@ -200,7 +201,7 @@ User=tngdb
 WorkingDirectory=/opt/tngdb
 EnvironmentFile=/etc/tngdb/env
 ExecStart=/opt/tngdb/.venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
-Restart=on-failure
+Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal

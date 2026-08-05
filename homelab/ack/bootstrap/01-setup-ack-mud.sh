@@ -143,11 +143,34 @@ clone_source() {
 # Build MUD source (if cloned)
 # ---------------------------------------------------------------------------
 
+# Apply local source patches before building.
+#
+# These exist because the upstream archive repos still carry the defect. Each
+# patch is idempotent and a no-op once upstream merges the fix, so this can
+# stay in place until every repo is updated. See homelab/ack/patches/README.md.
+apply_patches() {
+    local patch_script="/root/ack-patches/apply-shield-wearoff-segv.py"
+    [[ -x "$patch_script" ]] || { info "No source patches to apply"; return; }
+
+    # Locate the tree containing handler.c (layout varies per repo).
+    local src_dir
+    src_dir=$(dirname "$(find /opt/mud -name handler.c -not -path '*/.git/*' 2>/dev/null | head -1)")
+    if [[ -z "$src_dir" || ! -d "$src_dir" ]]; then
+        info "No handler.c found, skipping source patches"
+        return
+    fi
+
+    info "Applying source patches to ${src_dir}"
+    python3 "$patch_script" "$src_dir" || err "Source patch failed"
+}
+
 build_source() {
     if [[ ! -d /opt/mud/src/.git ]]; then
         info "No source to build, skipping"
         return
     fi
+
+    apply_patches
 
     info "Building MUD source"
     cd /opt/mud/src
@@ -201,6 +224,8 @@ setup_systemd() {
 [Unit]
 Description=ACK!TNG MUD server
 After=network.target
+# A crash-loop must not trip systemd's start limit and leave the MUD down.
+StartLimitIntervalSec=0
 
 [Service]
 Type=exec
@@ -210,7 +235,7 @@ Environment=TLS_PORT=0
 Environment=WSS_PORT=0
 Environment=WS_PORT=0
 ExecStart=/opt/mud/src/startup
-Restart=on-failure
+Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
@@ -240,12 +265,14 @@ UNIT
 [Unit]
 Description=$MUD_NAME MUD server
 After=network.target
+# A crash-loop must not trip systemd's start limit and leave the MUD down.
+StartLimitIntervalSec=0
 
 [Service]
 Type=exec
 WorkingDirectory=$area_dir
 ExecStart=$binary $MUD_PORT
-Restart=on-failure
+Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal

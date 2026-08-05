@@ -135,7 +135,16 @@ setup_dns() {
     info "Configuring dnsmasq"
     cat > /etc/dnsmasq.d/ack-gateway.conf <<DNSMASQ
 interface=$INTERNAL_IF
-bind-interfaces
+# bind-dynamic, NOT bind-interfaces.
+#
+# bind-interfaces requires $INTERNAL_IF to already exist when dnsmasq starts.
+# In an LXC container dnsmasq frequently wins the race against the interface
+# being brought up, and then exits 2 ("unknown interface") -- permanently,
+# because nothing retries. That took ACK DNS down for weeks at a time.
+#
+# bind-dynamic still listens only on $INTERNAL_IF, but tolerates the
+# interface appearing after startup.
+bind-dynamic
 
 no-resolv
 server=1.1.1.1

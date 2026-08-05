@@ -45,6 +45,46 @@ ACK MUD servers connect to a PostgreSQL database via libpq. The connection is co
 
 **Current state:** database host `ack-db` (CTID 246, 10.1.0.246) runs on the ACK network. MUD servers connect via `data/db.conf` pointing to `10.1.0.246`. The postgres_exporter on `:9187` ships metrics to obs. See `proposals/pending/ack-database-host.md` for migration details from the legacy host (192.168.1.112).
 
+## Self-healing
+
+Every ACK host runs a watchdog installed by `bootstrap/07-setup-selfheal.sh`:
+
+- **`Restart=always` + `StartLimitIntervalSec=0`** on its service. `on-failure`
+  ignored clean exits (the legacy ACK binaries exit 0 on some internal errors),
+  and without the start-limit override a brief crash-loop tripped systemd's
+  rate limit, which then refused to start the service again *at all* until an
+  operator intervened.
+- **A TCP port probe every 60s.** systemd only knows whether the process
+  exists. A MUD can be alive but wedged — accepting no connections while the
+  unit still reads `active`. That is not hypothetical: `assault30` sat wedged
+  for six days that way, its accept queue full, looking perfectly healthy.
+  Escalation is 3 failed probes → restart the unit, 3 failed restarts →
+  reboot the container (with an uptime guard so it cannot boot-loop).
+
+The probe port must match the host's real game port — `acktng` serves on
+**8890**, the other MUDs on 4000. A wrong port restarts a healthy service on a
+loop, so the mapping lives in one table at the top of the script.
+
+Re-run any time to repair drift (idempotent, non-destructive):
+
+```bash
+./bootstrap/07-setup-selfheal.sh --repair    # all hosts: onboot, stopped CTs,
+                                             # disabled units, re-arm watchdogs
+./bootstrap/07-setup-selfheal.sh --host acktng
+```
+
+Inspect a host:
+
+```bash
+pct exec <ctid> -- journalctl -t ack-healthcheck -n 50
+pct exec <ctid> -- systemctl list-timers ack-healthcheck.timer
+```
+
+Source-level fixes for defects still present upstream live in
+[`patches/`](patches/) and are applied at build time — see
+[patches/README.md](patches/README.md) for the shield-expiry SIGSEGV that
+crashed `ack42` every ~12 minutes.
+
 ## Observability
 
 All ACK hosts run Promtail, shipping logs to obs at 10.1.0.100:3100 (Loki tenant: `ack`). Promtail is deployed automatically by `pve-setup-ack.sh` (phase 4) if obs is reachable, or manually via `bootstrap/02-setup-promtail.sh`.

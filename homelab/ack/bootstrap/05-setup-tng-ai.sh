@@ -195,6 +195,7 @@ install_service() {
 [Unit]
 Description=TNG AI Service (NPC dialogue)
 After=network.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=exec
@@ -202,7 +203,7 @@ User=tng-ai
 WorkingDirectory=/opt/tng-ai
 EnvironmentFile=/etc/tng-ai/env
 ExecStart=/opt/tng-ai/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
-Restart=on-failure
+Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal

@@ -283,6 +283,11 @@ bootstrap() {
         IFS='|' read -r name ctid ip port repo <<< "$entry"
         step "Bootstrapping $name (CT $ctid)"
         pct push "$ctid" "$SCRIPT_DIR/01-setup-ack-mud.sh" /root/01-setup-ack-mud.sh --perms 0755
+
+        # Source patches the upstream archive repos have not merged yet.
+        pct exec "$ctid" -- mkdir -p /root/ack-patches
+        pct push "$ctid" "$SCRIPT_DIR/../patches/apply-shield-wearoff-segv.py" \
+            /root/ack-patches/apply-shield-wearoff-segv.py --perms 0755
         local repo_env=""
         [[ -n "$repo" ]] && repo_env="MUD_REPO=$repo"
         pct exec "$ctid" -- bash -c "DEBIAN_FRONTEND=noninteractive TERM=dumb MUD_NAME=$name MUD_IP=$ip MUD_PORT=$port $repo_env /root/01-setup-ack-mud.sh"
@@ -512,6 +517,23 @@ start_services() {
 # Phase 6: Verify services
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Phase: arm self-healing on every ACK host
+# ---------------------------------------------------------------------------
+#
+# Runs after start_services so the watchdogs see services already up. A host
+# whose service is down would otherwise burn its restart budget immediately.
+deploy_selfheal() {
+    local script="$SCRIPT_DIR/07-setup-selfheal.sh"
+    if [[ ! -x "$script" ]]; then
+        step "SKIP: 07-setup-selfheal.sh not found"
+        return
+    fi
+
+    step "Arming self-healing on ACK hosts"
+    "$script" || echo "WARN: self-healing failed on one or more hosts" >&2
+}
+
 verify_services() {
     info "Phase 6: Verify services"
 
@@ -584,6 +606,7 @@ main() {
     migrate_data
     deploy_promtail
     start_services
+    deploy_selfheal
     verify_services
 
     info "ACK! MUD network setup complete"
