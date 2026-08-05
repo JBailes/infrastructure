@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# 09-setup-deploy.sh -- Set up the deployment container (quad-homed)
+# 09-setup-deploy.sh -- Set up the deployment container (dual-homed)
 #
-# Runs on: deploy, Debian 13 LXC (quad-homed)
+# Runs on: deploy, Debian 13 LXC (dual-homed)
 #   eth0 = 192.168.1.101/23 on vmbr0 (Home LAN, internet-facing SSH)
-#   eth1 = 10.0.0.101/20 on vmbr1 (WOL prod)
-#   eth2 = 10.1.0.101/24 on vmbr2 (ACK private)
-#   eth3 = 10.0.1.101/24 on vmbr3 (WOL test)
-# CTID: 101
+#   eth1 = 10.1.0.101/24 on vmbr2 (ACK private)
 #
 # Provides:
 #   - SSH on :2222 (key-only, deploy user only, GitHub IP allowlist)
@@ -21,9 +18,7 @@
 set -euo pipefail
 
 LAN_IP="192.168.1.101"
-WOL_IP="10.0.0.101"
 ACK_IP="10.1.0.101"
-WOL_TEST_IP="10.0.1.101"
 SSH_PORT="2222"
 
 err()  { echo "ERROR: $*" >&2; exit 1; }
@@ -52,12 +47,10 @@ configure() {
     cat <<EOF
 
 ================================================================
-deploy container is ready (quad-homed).
+deploy container is ready (dual-homed).
 
 LAN:      $LAN_IP (eth0, internet-facing SSH on :$SSH_PORT)
-WOL prod: $WOL_IP (eth1)
-ACK:      $ACK_IP (eth2)
-WOL test: $WOL_TEST_IP (eth3)
+ACK:      $ACK_IP (eth1)
 
 SSH:      Port $SSH_PORT, deploy user only, key-only auth
           GitHub Actions IPs allowlisted via ipset
@@ -303,8 +296,6 @@ configure_firewall() {
     iptables -A INPUT -i eth0 -s 192.168.1.0/23 -p tcp --dport "$SSH_PORT" -j ACCEPT
 
     # SSH from private networks (operator access)
-    iptables -A INPUT -s 10.0.0.0/20 -p tcp --dport "$SSH_PORT" -j ACCEPT
-    iptables -A INPUT -s 10.0.1.0/24 -p tcp --dport "$SSH_PORT" -j ACCEPT
     iptables -A INPUT -s 10.1.0.0/24 -p tcp --dport "$SSH_PORT" -j ACCEPT
 
     # Persist rules

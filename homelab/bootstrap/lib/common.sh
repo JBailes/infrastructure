@@ -18,8 +18,58 @@ STORAGE="${STORAGE:-fast}"
 LAN_BRIDGE="vmbr0"
 LAN_CIDR=23
 ROUTER_GW="192.168.1.1"
-PRIVATE_BRIDGE="vmbr1"
 ACK_BRIDGE="vmbr2"
+
+# ---------------------------------------------------------------------------
+# Internal DNS
+# ---------------------------------------------------------------------------
+#
+# Every host is addressed by name under INTERNAL_ZONE. The dns host runs
+# Technitium, which is authoritative for the zone on the LAN (split-horizon:
+# internal answers point at internal IPs) and forwards everything else to the
+# router. IPs below are the bootstrap floor -- they exist so the DNS host
+# itself can be reached before DNS works, and so a host can be recovered when
+# DNS is down. Prefer the *_HOST names everywhere else.
+
+# Terraform owns the inventory and writes the resolver's address here. Sourced
+# when present so bash and Terraform cannot disagree about where DNS lives;
+# the defaults below apply when provisioning by hand.
+_TF_ENV="$(dirname "${BASH_SOURCE[0]}")/terraform.env"
+# shellcheck source=/dev/null
+[[ -r "$_TF_ENV" ]] && source "$_TF_ENV"
+
+INTERNAL_ZONE="${INTERNAL_ZONE:-bailes.us}"
+
+DNS_HOST="dns.${INTERNAL_ZONE}"
+DNS_IP="${DNS_IP:-192.168.1.149}"
+DNS_VMID="${DNS_CTID:-149}"
+
+APT_CACHE_HOST="apt-cache.${INTERNAL_ZONE}"
+APT_CACHE_IP="192.168.1.115"
+APT_CACHE_PORT=3142
+
+OBS_HOST="obs.${INTERNAL_ZONE}"
+OBS_IP="192.168.1.100"
+
+NGINX_PROXY_HOST="nginx-proxy.${INTERNAL_ZONE}"
+NGINX_PROXY_IP="192.168.1.118"
+
+# Resolve a hostname to an IP using the internal DNS server explicitly.
+# Falls back to the caller-supplied bootstrap IP when DNS is not up yet, so
+# that a broken DNS host never blocks re-provisioning the rest of the LAN.
+# Usage: resolve_host <fqdn> <fallback_ip>
+resolve_host() {
+    local fqdn="${1:?Usage: resolve_host <fqdn> <fallback_ip>}"
+    local fallback="${2:?Usage: resolve_host <fqdn> <fallback_ip>}"
+    local answer
+    answer=$(getent ahostsv4 "$fqdn" 2>/dev/null | awk 'NR==1{print $1}') || true
+    if [[ -n "$answer" ]]; then
+        echo "$answer"
+    else
+        warn "DNS lookup for $fqdn failed, falling back to $fallback"
+        echo "$fallback"
+    fi
+}
 
 # ---------------------------------------------------------------------------
 # CTID allocation and resolution
@@ -28,6 +78,7 @@ ACK_BRIDGE="vmbr2"
 CTID_RANGE_START=100
 VPN_GATEWAY_VMID=104
 VPN_GATEWAY_IP="192.168.1.104"
+VPN_GATEWAY_HOST="vpn-gateway.${INTERNAL_ZONE}"
 CLOUD_IMAGE_FILENAME="debian-13-genericcloud-amd64.qcow2"
 CLOUD_IMAGE_URL="https://cloud.debian.org/images/cloud/trixie/latest/${CLOUD_IMAGE_FILENAME}"
 CLOUD_IMAGE_PATH="/mnt/pve/${IMAGE_STORAGE}/template/iso/${CLOUD_IMAGE_FILENAME}"
@@ -85,6 +136,8 @@ create_lxc() {
         --cores "$cores" \
         --rootfs "${STORAGE}:${disk}" \
         --net0 "name=eth0,bridge=${LAN_BRIDGE},ip=${ip}/${LAN_CIDR},gw=${gw}" \
+        --nameserver "$DNS_IP" \
+        --searchdomain "$INTERNAL_ZONE" \
         $priv_flag \
         --features nesting=1 \
         "$@" \

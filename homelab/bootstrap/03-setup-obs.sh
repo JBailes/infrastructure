@@ -3,9 +3,8 @@
 #
 # Runs on: obs, Debian 13 LXC (quad-homed)
 #   eth0 = 192.168.1.100/23 on vmbr0 (Home LAN)
-#   eth1 = 10.0.0.100/20 on vmbr1 (WOL prod/shared)
+#   eth1 = 10.1.0.100/24 on vmbr2 (ACK private network)
 #   eth2 = 10.1.0.100/24 on vmbr2 (ACK private)
-#   eth3 = 10.0.1.100/24 on vmbr3 (WOL test)
 # CTID: 100 (static, homelab convention)
 #
 # Installs and configures:
@@ -16,7 +15,6 @@
 #   - Promtail (self-monitoring, ships obs own logs to Loki)
 #
 # Accepts log/metric ingestion from three networks:
-#   - WOL (10.0.0.0/20): mTLS with cfssl client certs (tenant: wol)
 #   - ACK (10.1.0.0/24): TLS (tenant: ack)
 #   - External (192.168.0.0/23): TLS + API key (tenant: proxmox, future external)
 #
@@ -39,20 +37,17 @@ _LIB="$(dirname "$0")/lib/common.sh"; [[ -f "$_LIB" ]] || _LIB="/root/lib/common
 CTID=100
 HOSTNAME="obs"
 LAN_IP="192.168.1.100"
-WOL_IP="10.0.0.100"
 ACK_IP="10.1.0.100"
-WOL_TEST_IP="10.0.1.100"
 RAM=2048
 CORES=2
 DISK=64
 PRIVILEGED="no"
 
-CA_IP="10.0.0.203"
-CA_PORT="8443"
 OBS_ETC="/etc/obs"
 OBS_DATA="/var/lib/obs"
-INTERNAL_IP="$WOL_IP"
+INTERNAL_IP="$LAN_IP"
 EXTERNAL_IP="$LAN_IP"
+INTERNAL_ZONE="${INTERNAL_ZONE:-bailes.us}"
 
 err()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
@@ -68,9 +63,7 @@ host_main() {
     info "Creating obs container (CTID $CTID)"
 
     create_lxc "$CTID" "$HOSTNAME" "$LAN_IP" "$RAM" "$CORES" "$DISK" "$ROUTER_GW" "$PRIVILEGED" \
-        --net1 "name=eth1,bridge=${PRIVATE_BRIDGE},ip=${WOL_IP}/20" \
-        --net2 "name=eth2,bridge=${ACK_BRIDGE},ip=${ACK_IP}/24" \
-        --net3 "name=eth3,bridge=vmbr3,ip=${WOL_TEST_IP}/24" \
+        --net1 "name=eth1,bridge=${ACK_BRIDGE},ip=${ACK_IP}/24" \
     || { info "Container already exists, deploying config"; }
 
     pct start "$CTID" 2>/dev/null || true
@@ -175,26 +168,21 @@ configure() {
     cat <<EOF
 
 ================================================================
-obs observability stack is ready (tri-homed).
+obs observability stack is ready (dual-homed).
 
-Loki:         https://$WOL_IP:3100 (WOL mTLS)
-              https://$ACK_IP:3100 (ACK TLS)
-              https://$LAN_IP:3100 (external TLS+API key)
-Prometheus:   http://$WOL_IP:9090
+Loki:         https://$ACK_IP:3100 (ACK TLS)
+              https://$LAN_IP:3100 (LAN TLS + API key)
+Prometheus:   http://$LAN_IP:9090
 Alertmanager: http://localhost:9093
-Grafana:      http://$LAN_IP
+Grafana:      http://obs.$INTERNAL_ZONE
 
 Grafana admin password: /etc/obs/grafana-admin-password
 
-Cert enrollment is automated when CA_FINGERPRINT is set.
-1. Enroll Loki server cert (CN=obs, SAN=DNS:obs,IP:$WOL_IP,IP:$LAN_IP,IP:$ACK_IP):
-   # Use enroll_cert_from_ca for obs $OBS_ETC/certs/loki-server.crt $OBS_ETC/certs/loki-server.key \\
-       --san obs --san $WOL_IP --san $LAN_IP --san $ACK_IP
-2. Enroll Prometheus client cert (CN=prometheus):
-   # Use enroll_cert_from_ca for prometheus $OBS_ETC/certs/prometheus-client.crt $OBS_ETC/certs/prometheus-client.key
-3. Copy root_ca.crt to $OBS_ETC/certs/root_ca.crt
-4. Restart Loki: systemctl restart loki
-5. Run Promtail setup on all hosts
+Loki serves a self-signed certificate until the wildcard is deployed.
+nginx-proxy's certbot deploy hook pushes *.$INTERNAL_ZONE to
+/etc/ssl/internal on this host after each renewal.
+
+Next: run Promtail setup on the hosts that should ship logs.
 ================================================================
 EOF
 }
@@ -205,19 +193,12 @@ EOF
 
 prechecks() {
     info "Running prechecks"
-    # CA is optional at bootstrap time (obs is deployed before WOL infra).
-    # Cert enrollment happens later when the CA is up.
-    if curl -sf "http://$CA_IP:$CA_PORT/api/v1/cfssl/health" &>/dev/null; then
-        info "CA reachable at $CA_IP:$CA_PORT"
+    # Loki starts with a self-signed certificate; the real one arrives via
+    # nginx-proxy's certbot deploy hook once the wildcard is issued.
+    if [[ -f /etc/ssl/internal/fullchain.pem ]]; then
+        info "Wildcard certificate present"
     else
-        echo "NOTE: CA not reachable at $CA_IP:$CA_PORT (expected if WOL is not yet bootstrapped)" >&2
-        echo "      Loki will start with a self-signed cert. Enroll a CA cert later." >&2
-    fi
-    # Gateway is optional (obs may be deployed before WOL gateways)
-    if ping -c1 -W2 10.0.0.200 &>/dev/null; then
-        info "Gateway reachable"
-    else
-        echo "NOTE: Gateway not reachable (expected if WOL is not yet bootstrapped)" >&2
+        echo "NOTE: no wildcard certificate yet, Loki will use a self-signed cert" >&2
     fi
     info "Prechecks passed"
 }
@@ -335,8 +316,8 @@ generate_self_signed_cert() {
         -out "$OBS_ETC/certs/loki-server.crt" \
         -days 365 \
         -nodes \
-        -subj "/CN=obs/O=WOL Infrastructure" \
-        -addext "subjectAltName=DNS:obs,IP:$WOL_IP,IP:$LAN_IP,IP:$ACK_IP"
+        -subj "/CN=obs/O=Homelab" \
+        -addext "subjectAltName=DNS:obs,DNS:obs.${INTERNAL_ZONE},IP:$LAN_IP,IP:$ACK_IP"
 
     chmod 600 "$OBS_ETC/certs/loki-server.key"
     chown loki:loki "$OBS_ETC/certs/loki-server.key" "$OBS_ETC/certs/loki-server.crt"
@@ -422,51 +403,18 @@ alerting:
         - targets: ['localhost:9093']
 
 scrape_configs:
-  # WOL internal services (plain HTTP on private network, mTLS deferred to SPIRE rollout)
-  - job_name: wol
-    scheme: http
-    # Only services with prometheus-net /metrics endpoint.
-    # wol-web, wol-realm, spire-server use blackbox /health probes.
-    # wol-a and wol-ai will be added when they expose /metrics.
-    static_configs:
-      - targets: ['10.0.0.207:8443']
-        labels:
-          name: wol-accounts
-      - targets: ['10.0.0.211:8443']
-        labels:
-          name: wol-world-prod
-      - targets: ['10.0.1.216:8443']
-        labels:
-          name: wol-world-test
-    metrics_path: /metrics
-    sample_limit: 5000
-
-  # Database hosts (postgres_exporter, plain HTTP on private network)
-  - job_name: postgres
+  # Homelab hosts (node_exporter).
+  #
+  # Addressed by name: CTIDs -- and therefore IPs -- are allocated
+  # dynamically, so anything pinned to an address here goes stale the first
+  # time a host is rebuilt.
+  - job_name: homelab
     scheme: http
     static_configs:
-      - targets: ['10.0.0.202:9187']
+      - targets: ['vpn-gateway.bailes.us:9100']
         labels:
-          name: spire-db
-      - targets: ['10.0.0.206:9187']
-        labels:
-          name: wol-accounts-db
-      - targets: ['10.0.0.213:9187']
-        labels:
-          name: wol-world-db-prod
-      - targets: ['10.0.0.214:9187']
-        labels:
-          name: wol-realm-db-prod
-      - targets: ['10.0.1.218:9187']
-        labels:
-          name: wol-world-db-test
-      - targets: ['10.0.1.219:9187']
-        labels:
-          name: wol-realm-db-test
+          name: vpn-gateway
     sample_limit: 5000
-
-  # SPIRE Server removed from direct scrape (gRPC on :8081, no /metrics endpoint).
-  # Monitored via blackbox HTTP probe on :8080/ready instead (see 08-setup-dashboards.sh).
 
   # ACK hosts (plaintext, isolated network)
   - job_name: ack
@@ -549,148 +497,73 @@ YAML
 
 configure_alert_rules() {
     info "Writing Prometheus alert rules"
-    cat > /etc/prometheus/rules.d/wol-alerts.yml <<'YAML'
+    # The gateway's watchdog exports these; see lib/vpn-selfheal.sh. The
+    # watchdog restarts and ultimately reboots on its own, so these alerts
+    # fire only when self-healing has already failed to recover the tunnel.
+    cat > /etc/prometheus/rules.d/vpn-alerts.yml <<'YAML'
 groups:
-  - name: wol-infrastructure
+  - name: vpn-gateway
+    rules:
+      - alert: VpnTunnelDown
+        expr: vpn_gateway_tunnel_up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "VPN tunnel is not passing traffic"
+          description: "No packets have crossed tun0 for 5 minutes. The watchdog restarts openvpn after 3 failed probes and reboots after 3 failed restarts; if this alert is firing, both have failed."
+
+      - alert: VpnRestartLoop
+        expr: vpn_gateway_restarts_since_recovery >= 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "VPN gateway is restarting repeatedly without recovering"
+          description: "{{ $value }} openvpn restarts have not restored the tunnel. A reboot follows the third. Usually means the provider endpoint is unreachable."
+
+      - alert: VpnGatewayMetricsMissing
+        expr: up{name="vpn-gateway"} == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cannot scrape the VPN gateway"
+          description: "node_exporter on vpn-gateway has been unreachable for 10 minutes, so tunnel health is unknown."
+YAML
+
+    cat > /etc/prometheus/rules.d/homelab-alerts.yml <<'YAML'
+groups:
+  - name: homelab
     rules:
       - alert: ServiceDown
         expr: up == 0
-        for: 30s
-        labels:
-          severity: critical
-        annotations:
-          summary: "{{ $labels.instance }} is down"
-
-      - alert: CertRenewalFailed
-        expr: increase(cert_renewal_failures_total[5m]) > 0
-        labels:
-          severity: critical
-        annotations:
-          summary: "Certificate renewal failed on {{ $labels.instance }}"
-
-      - alert: CertExpiringSoon
-        expr: cert_not_after_seconds - time() < 7200
         for: 5m
         labels:
-          severity: warning
-        annotations:
-          summary: "Certificate on {{ $labels.instance }} expires in < 2 hours"
-
-      - alert: ClockSkewHigh
-        expr: abs(ntp_offset_seconds) > 15
-        for: 1m
-        labels:
-          severity: warning
-        annotations:
-          summary: "NTP offset > 15s on {{ $labels.instance }}"
-
-      - alert: ClockSkewCritical
-        expr: abs(ntp_offset_seconds) > 30
-        for: 1m
-        labels:
           severity: critical
         annotations:
-          summary: "NTP offset > 30s on {{ $labels.instance }}"
-
-      - alert: SpireAgentUnhealthy
-        expr: spire_agent_health != 1
-        for: 60s
-        labels:
-          severity: critical
-        annotations:
-          summary: "SPIRE Agent unhealthy on {{ $labels.instance }}"
-
-      - alert: SpireServerUnhealthy
-        expr: spire_server_health != 1
-        for: 30s
-        labels:
-          severity: critical
-        annotations:
-          summary: "SPIRE Server unhealthy"
-
-      - alert: HighErrorRate
-        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) by (instance) / sum(rate(http_requests_total[5m])) by (instance) > 0.05
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "HTTP 5xx rate > 5% on {{ $labels.instance }}"
-
-      - alert: DBConnectionExhausted
-        expr: pg_stat_activity_count / pg_settings_max_connections > 0.8
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "DB connections > 80% on {{ $labels.instance }}"
+          summary: "{{ $labels.name }} is not being scraped"
+          description: "Prometheus has failed to scrape {{ $labels.name }} ({{ $labels.instance }}) for 5 minutes."
 
       - alert: DiskSpaceLow
-        expr: node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.15
-        for: 5m
+        expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.10
+        for: 15m
         labels:
           severity: warning
         annotations:
-          summary: "Disk space < 15% on {{ $labels.instance }}"
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Less than 10% free on {{ $labels.mountpoint }}."
 
-      - alert: AuthDeniedSpike
-        expr: rate(auth_denied_total[1m]) > 5
-        for: 2m
+      - alert: CertExpiringSoon
+        expr: probe_ssl_earliest_cert_expiry - time() < 86400 * 14
+        for: 1h
         labels:
           severity: warning
         annotations:
-          summary: "Auth denied rate > 5/min on {{ $labels.instance }}"
-
-      - alert: CardinalityBudgetExceeded
-        expr: scrape_samples_scraped > 4000
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Scrape cardinality > 4000 on {{ $labels.instance }} (hard cap 5000)"
-
-      - alert: DependencyDown
-        expr: dependency_up == 0
-        for: 30s
-        labels:
-          severity: critical
-        annotations:
-          summary: "{{ $labels.instance }} cannot reach dependency {{ $labels.dependency }}"
-
-  - name: proxmox
-    rules:
-      - alert: ProxmoxHostCpuHigh
-        expr: pve_cpu_usage_ratio{id="node/pve"} > 0.9
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Proxmox host CPU > 90%"
-
-      - alert: ProxmoxHostMemoryHigh
-        expr: pve_memory_usage_bytes / pve_memory_size_bytes > 0.9
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Proxmox host memory > 90%"
-
-      - alert: ProxmoxStorageLow
-        expr: pve_disk_usage_bytes / pve_disk_size_bytes > 0.85
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Proxmox storage > 85% used"
-
-      - alert: ProxmoxGuestDown
-        expr: pve_up{id=~"lxc/.*|qemu/.*"} == 0
-        for: 60s
-        labels:
-          severity: critical
-        annotations:
-          summary: "Proxmox guest {{ $labels.id }} is down"
+          summary: "TLS certificate for {{ $labels.instance }} expires soon"
+          description: "Expires in {{ $value | humanizeDuration }}. certbot renews at 30 days, so this means renewal is failing."
 YAML
-    chown prometheus:prometheus /etc/prometheus/rules.d/wol-alerts.yml
+    chown prometheus:prometheus /etc/prometheus/rules.d/homelab-alerts.yml
 }
 
 # ---------------------------------------------------------------------------
@@ -739,7 +612,7 @@ configure_grafana() {
     info "Configuring Grafana datasources"
     mkdir -p /etc/grafana/provisioning/datasources
 
-    cat > /etc/grafana/provisioning/datasources/wol.yml <<YAML
+    cat > /etc/grafana/provisioning/datasources/obs.yml <<YAML
 apiVersion: 1
 datasources:
   - name: Prometheus
@@ -749,17 +622,6 @@ datasources:
     url: http://localhost:9090
     isDefault: true
     editable: false
-
-  - name: Loki (WOL)
-    type: loki
-    access: proxy
-    url: https://localhost:3100
-    editable: false
-    jsonData:
-      httpHeaderName1: X-Scope-OrgID
-      tlsSkipVerify: true
-    secureJsonData:
-      httpHeaderValue1: wol
 
   - name: Loki (ACK)
     type: loki
@@ -987,49 +849,37 @@ SYSCTL
 }
 
 configure_gateway_route() {
-    # obs is on the LAN (eth0, default route via 192.168.1.1 from LXC creation).
-    # ECMP route through WOL gateways is added only if they are reachable,
-    # for WOL-network connectivity. If gateways are not up yet (obs deployed
-    # before WOL), the LAN default route is sufficient for internet/apt.
-    if ping -c1 -W2 10.0.0.200 &>/dev/null; then
-        ip route del default 2>/dev/null || true
-        ip route add default nexthop via 10.0.0.200 nexthop via 10.0.0.201
-        info "ECMP default route set via WOL gateways"
-    else
-        info "WOL gateways not reachable, keeping LAN default route (192.168.1.1)"
-    fi
+    # obs sits on the LAN with its default route via the router, set at
+    # container creation. No additional routing is needed.
+    info "Using the LAN default route (${ROUTER_GW:-192.168.1.1})"
 }
 
 configure_dns_ntp() {
-    # Use WOL gateways for DNS/NTP if reachable, otherwise use the home router.
-    if ping -c1 -W2 10.0.0.200 &>/dev/null; then
-        cat > /etc/resolv.conf <<RESOLV
-nameserver 10.0.0.200
-nameserver 10.0.0.201
+    # Internal resolver first so other hosts can be scraped and probed by
+    # name; the router stays as a fallback so obs keeps resolving if the dns
+    # host is down.
+    cat > /etc/resolv.conf <<RESOLV
+search ${INTERNAL_ZONE}
+nameserver ${DNS_IP:-192.168.1.149}
+nameserver ${ROUTER_GW:-192.168.1.1}
 RESOLV
-        info "DNS set to WOL gateways"
-    else
-        cat > /etc/resolv.conf <<RESOLV
-nameserver 192.168.1.1
-RESOLV
-        info "DNS set to home router (WOL gateways not yet reachable)"
-    fi
+    info "DNS set to the internal resolver, router as fallback"
+
     if command -v chronyc &>/dev/null; then
         cat > /etc/chrony/chrony.conf <<CHRONY
-server 10.0.0.200 iburst prefer
-server 10.0.0.201 iburst prefer
-server 192.168.1.1 iburst
+server ${ROUTER_GW:-192.168.1.1} iburst
+pool 2.debian.pool.ntp.org iburst
 driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 CHRONY
         systemctl restart chrony 2>/dev/null || true
-        info "NTP configured (WOL gateways preferred, home router fallback)"
+        info "NTP configured (router preferred, public pool as backup)"
     fi
 }
 
 configure_firewall() {
-    info "Configuring firewall (quad-homed, iptables)"
+    info "Configuring firewall (dual-homed, iptables)"
 
     # Flush existing rules
     iptables -F INPUT 2>/dev/null || true
@@ -1045,21 +895,12 @@ configure_firewall() {
     iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
     iptables -A INPUT -i lo -j ACCEPT
 
-    # WOL interface (eth1, 10.0.0.0/20): SSH, Loki (mTLS), Prometheus
-    iptables -A INPUT -s 10.0.0.0/20 -p tcp --dport 22 -j ACCEPT
-    iptables -A INPUT -s 10.0.0.0/20 -p tcp --dport 3100 -j ACCEPT
-    iptables -A INPUT -s 10.0.0.0/20 -p tcp --dport 9090 -j ACCEPT
-
-    # ACK interface (eth2, 10.1.0.0/24): Loki (TLS), Prometheus
+    # ACK interface (eth1, 10.1.0.0/24): Loki (TLS), Prometheus
     iptables -A INPUT -s 10.1.0.0/24 -p tcp --dport 3100 -j ACCEPT
     iptables -A INPUT -s 10.1.0.0/24 -p tcp --dport 9090 -j ACCEPT
 
-    # WOL test interface (eth3, 10.0.1.0/24): SSH, Loki (mTLS), Prometheus
-    iptables -A INPUT -s 10.0.1.0/24 -p tcp --dport 22 -j ACCEPT
-    iptables -A INPUT -s 10.0.1.0/24 -p tcp --dport 3100 -j ACCEPT
-    iptables -A INPUT -s 10.0.1.0/24 -p tcp --dport 9090 -j ACCEPT
-
     # LAN interface (eth0, 192.168.0.0/23): Grafana (80 redirected to 3000), Loki, Prometheus
+    iptables -A INPUT -s 192.168.0.0/23 -p tcp --dport 22 -j ACCEPT
     iptables -A INPUT -s 192.168.0.0/23 -p tcp --dport 80 -j ACCEPT
     iptables -A INPUT -s 192.168.0.0/23 -p tcp --dport 3000 -j ACCEPT
     iptables -A INPUT -s 192.168.0.0/23 -p tcp --dport 3100 -j ACCEPT

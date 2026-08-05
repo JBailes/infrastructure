@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+
+proxmox_endpoint  = "https://192.168.1.253:8006/"
+proxmox_api_token = "terraform@pve!tf=00000000-0000-0000-0000-000000000000"
+proxmox_insecure  = true
+
+node_name = "pve"
+storage   = "fast"
+
+internal_zone = "bailes.us"
+router_gw     = "192.168.1.1"
+
+# Leave empty on the first apply -- the dns host does not exist yet, so there
+# is nothing to register against. Fill it in from /etc/dns-api-token on the
+# dns host afterwards and re-apply to register every record.
+dns_api_token = ""
+
+ssh_public_key = "ssh-ed25519 AAAA... you@example.com"
+
+# Only needed to break a CTID collision, which the plan will tell you about:
+#   ctid_salt = { obs = 1 }

@@ -8,23 +8,38 @@
 #   ./06-setup-nginx-proxy.sh --deploy-only  # Re-run configuration on existing CT
 #   ./06-setup-nginx-proxy.sh --configure    # (internal) Run inside the container
 #
-# Creates a Debian 13 LXC (CT 118) tri-homed on all three bridges:
+# Creates a Debian 13 LXC (CT 118) dual-homed:
 #   eth0 = 192.168.1.118/23 on vmbr0 (LAN, incoming HTTPS from router)
-#   eth1 = 10.0.0.118/20 on vmbr1 (WOL, reach wol-web)
-#   eth2 = 10.1.0.118/24 on vmbr2 (ACK, reach ack-web)
+#   eth1 = 10.1.0.118/24 on vmbr2 (ACK, reach ack-web)
 #
 # Central nginx reverse proxy for all web sites. Handles TLS termination
-# via certbot and routes by Host header to the appropriate backend:
+# and routes by Host header to the appropriate backend:
 #   ackmud.com      -> ack-web (10.1.0.247:5000) + stream for WSS ports
 #   aha.ackmud.com  -> redirect to ackmud.com
-#   bailes.us       -> personal-web (192.168.1.117:3000)
-#   rakuensoftware.com -> rakuen-web (192.168.1.121:3000)
+#   bailes.us       -> personal-web.bailes.us:3000
+#   rakuensoftware.com -> rakuen-web.bailes.us:3000
 #   rakuensoft.com  -> redirect to rakuensoftware.com
+#
+# LAN backends are addressed by name through the internal resolver, because
+# CTIDs (and therefore IPs) are allocated dynamically. ACK backends stay
+# numeric: that network has its own dnsmasq and is not part of the internal
+# zone.
+#
+# TLS uses the DNS-01 challenge via Cloudflare, which yields a *.bailes.us
+# wildcard covering every internal host. A deploy hook pushes that wildcard
+# to the internal services that consume it on each renewal.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/null || true
+
+# This script is pushed into the container on its own, without lib/, so the
+# values common.sh would supply need defaults here too. Host-side runs get
+# them from common.sh (and therefore from terraform.env when present).
+INTERNAL_ZONE="${INTERNAL_ZONE:-bailes.us}"
+DNS_IP="${DNS_IP:-192.168.1.149}"
+ROUTER_GW="${ROUTER_GW:-192.168.1.1}"
 
 # ---------------------------------------------------------------------------
 # Container specification
@@ -33,7 +48,6 @@ _LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/nu
 CTID=118
 HOSTNAME="nginx-proxy"
 LAN_IP="192.168.1.118"
-WOL_IP="10.0.0.118"
 ACK_IP="10.1.0.118"
 RAM=256
 CORES=1
@@ -51,8 +65,7 @@ host_main() {
     info "Creating nginx-proxy container (CTID $CTID)"
 
     create_lxc "$CTID" "$HOSTNAME" "$LAN_IP" "$RAM" "$CORES" "$DISK" "$ROUTER_GW" "$PRIVILEGED" \
-        --net1 "name=eth1,bridge=${PRIVATE_BRIDGE},ip=${WOL_IP}/20" \
-        --net2 "name=eth2,bridge=${ACK_BRIDGE},ip=${ACK_IP}/24" \
+        --net1 "name=eth1,bridge=${ACK_BRIDGE},ip=${ACK_IP}/24" \
     || { info "Container already exists, deploying config"; }
 
     pct start "$CTID" 2>/dev/null || true
@@ -84,17 +97,16 @@ configure() {
     cat <<EOF
 
 ================================================================
-nginx-proxy is ready (tri-homed).
+nginx-proxy is ready (dual-homed).
 
 LAN:  $LAN_IP (eth0, vmbr0) -- incoming HTTPS from router
-WOL:  $WOL_IP (eth1, vmbr1) -- shared/private WOL reachability
-ACK:  $ACK_IP (eth2, vmbr2) -- reach ack-web (10.1.0.247:5000)
+ACK:  $ACK_IP (eth1, vmbr2) -- reach ack-web (10.1.0.247:5000)
 
 Routing:
   ackmud.com      -> http://10.1.0.247:5000 (ack-web)
   aha.ackmud.com  -> https://ackmud.com
-  bailes.us       -> http://192.168.1.117:3000 (personal-web)
-  rakuensoftware.com -> http://192.168.1.121:3000 (rakuen-web)
+  bailes.us       -> http://personal-web.${INTERNAL_ZONE}:3000
+  rakuensoftware.com -> http://rakuen-web.${INTERNAL_ZONE}:3000
   rakuensoft.com  -> https://rakuensoftware.com (301)
   WSS :18890      -> 10.1.0.247:18890
   WSS :8891       -> 10.1.0.247:8891
@@ -103,7 +115,9 @@ Routing:
 Caching proxy:
   :8080 -> dotnetcli.azureedge.net (cached .NET SDK/runtime downloads)
 
-TLS: certbot runs automatically. Renewal via certbot.timer.
+TLS: DNS-01 via Cloudflare. Renewal via certbot.timer.
+Certificates: *.${INTERNAL_ZONE} (wildcard, internal) plus the public sites.
+The wildcard is pushed to internal consumers by the certbot deploy hook.
 ================================================================
 EOF
 }
@@ -127,8 +141,13 @@ SYSCTL
 
 configure_dns_resolver() {
     info "Configuring DNS resolver"
+    # Internal resolver first so upstreams can be named rather than numbered;
+    # the router is kept as a fallback so TLS issuance and proxying keep
+    # working if the dns host is down.
     cat > /etc/resolv.conf <<RESOLV
-nameserver 192.168.1.1
+search ${INTERNAL_ZONE}
+nameserver ${DNS_IP}
+nameserver ${ROUTER_GW}
 RESOLV
 }
 
@@ -140,7 +159,8 @@ install_packages() {
     info "Installing packages"
     apt-get update -qq
     apt-get install -y --no-install-recommends \
-        nginx libnginx-mod-stream certbot python3-certbot-nginx iptables chrony
+        nginx libnginx-mod-stream certbot python3-certbot-nginx \
+        python3-certbot-dns-cloudflare iptables chrony openssh-client
 }
 
 # ---------------------------------------------------------------------------
@@ -235,7 +255,7 @@ server {
     server_name bailes.us www.bailes.us;
 
     location / {
-        proxy_pass http://192.168.1.117:3000;
+        proxy_pass http://personal-web.bailes.us:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -250,7 +270,7 @@ server {
     server_name rakuensoftware.com www.rakuensoftware.com;
 
     location / {
-        proxy_pass http://192.168.1.121:3000;
+        proxy_pass http://rakuen-web.bailes.us:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -342,9 +362,8 @@ configure_firewall() {
     iptables -A INPUT -p tcp --dport 80 -j ACCEPT
     iptables -A INPUT -p tcp --dport 443 -j ACCEPT
 
-    # .NET caching proxy from all local networks
+    # .NET caching proxy from the local networks
     iptables -A INPUT -s 192.168.0.0/23 -p tcp --dport 8080 -j ACCEPT
-    iptables -A INPUT -s 10.0.0.0/20 -p tcp --dport 8080 -j ACCEPT
     iptables -A INPUT -s 10.1.0.0/24 -p tcp --dport 8080 -j ACCEPT
 
     # Legacy MUD WSS ports from anywhere
@@ -393,60 +412,104 @@ enable_services() {
 # TLS certificates (certbot)
 # ---------------------------------------------------------------------------
 
-CERTBOT_EMAIL="jbailes@gmail.com"
+CERTBOT_EMAIL="${CERTBOT_EMAIL:-jbailes@gmail.com}"
+CF_CREDENTIALS="/etc/letsencrypt/cloudflare.ini"
+
+# Certificates to issue: name|comma-separated domains
+#
+# These use the DNS-01 challenge via Cloudflare rather than HTTP-01, for
+# two reasons:
+#
+#   1. A wildcard (*.bailes.us) is only issuable over DNS-01. That single
+#      cert covers every internal host, so services with no inbound path
+#      from the internet still get a real, publicly-trusted certificate.
+#   2. DNS-01 needs no inbound :80, so issuance and renewal keep working
+#      regardless of port forwarding or which host the name points at.
+#
+# Every domain here must therefore have its DNS hosted at Cloudflare and be
+# covered by the API token in cloudflare.ini. A domain hosted elsewhere
+# cannot be issued this way -- see the failure note below.
+CERTS=(
+    "bailes.us|bailes.us,*.bailes.us"
+    "ackmud.com|ackmud.com,www.ackmud.com,aha.ackmud.com"
+    "rakuensoftware.com|rakuensoftware.com,www.rakuensoftware.com"
+    "rakuensoft.com|rakuensoft.com,www.rakuensoft.com"
+)
+
+# Internal hosts that consume the wildcard. The deploy hook copies it to
+# each after every successful renewal.
+# Format: host|destination dir|reload command
+CERT_CONSUMERS=(
+    "obs.${INTERNAL_ZONE}|/etc/ssl/internal|systemctl reload grafana-server || true"
+    "dns.${INTERNAL_ZONE}|/etc/ssl/internal|systemctl restart dns || true"
+)
+
+install_cloudflare_credentials() {
+    if [[ -f "$CF_CREDENTIALS" ]]; then
+        chmod 0600 "$CF_CREDENTIALS"
+        info "Cloudflare credentials already present"
+        return 0
+    fi
+
+    if [[ -f /root/secrets/cloudflare.ini ]]; then
+        install -m 0600 /root/secrets/cloudflare.ini "$CF_CREDENTIALS"
+        rm -f /root/secrets/cloudflare.ini
+        info "Installed Cloudflare credentials"
+        return 0
+    fi
+
+    return 1
+}
 
 obtain_certificates() {
-    info "Obtaining TLS certificates via certbot"
+    info "Obtaining TLS certificates via certbot (DNS-01, Cloudflare)"
 
-    local failed=0
+    if ! install_cloudflare_credentials; then
+        cat >&2 <<'NOCREDS'
 
-    # ACK Historical Archive
-    if certbot --nginx --non-interactive --agree-tos \
-        --email "$CERTBOT_EMAIL" \
-        --keep-until-expiring \
-        -d ackmud.com -d www.ackmud.com -d aha.ackmud.com; then
-        info "Certificate obtained for ackmud.com"
-    else
-        echo "WARNING: certbot failed for ackmud.com (DNS may not be pointed yet)" >&2
-        failed=1
+================================================================
+No Cloudflare API credentials found, skipping certificate issuance.
+
+Create an API token with Zone:DNS:Edit on the relevant zones and put it
+in homelab/bootstrap/secrets/cloudflare.ini as:
+
+  dns_cloudflare_api_token = <token>
+
+Then re-run with --deploy-only.
+================================================================
+NOCREDS
+        return 0
     fi
 
-    # Personal site (bailes.us, www)
-    if certbot --nginx --non-interactive --agree-tos \
-        --email "$CERTBOT_EMAIL" \
-        --keep-until-expiring \
-        -d bailes.us -d www.bailes.us; then
-        info "Certificate obtained for bailes.us"
-    else
-        echo "WARNING: certbot failed for bailes.us (DNS may not be pointed yet)" >&2
-        failed=1
-    fi
+    local failed=0 entry name domains d
+    local -a args
 
-    # Rakuen Software site (rakuensoftware.com, www)
-    if certbot --nginx --non-interactive --agree-tos \
-        --email "$CERTBOT_EMAIL" \
-        --keep-until-expiring \
-        -d rakuensoftware.com -d www.rakuensoftware.com; then
-        info "Certificate obtained for rakuensoftware.com"
-    else
-        echo "WARNING: certbot failed for rakuensoftware.com (DNS may not be pointed yet)" >&2
-        failed=1
-    fi
+    for entry in "${CERTS[@]}"; do
+        IFS='|' read -r name domains <<< "$entry"
 
-    # Short domain (rakuensoft.com, www) -- redirects to rakuensoftware.com.
-    # It still needs its own certificate, otherwise https://rakuensoft.com
-    # fails TLS before nginx ever gets to issue the redirect.
-    if certbot --nginx --non-interactive --agree-tos \
-        --email "$CERTBOT_EMAIL" \
-        --keep-until-expiring \
-        -d rakuensoft.com -d www.rakuensoft.com; then
-        info "Certificate obtained for rakuensoft.com"
-    else
-        echo "WARNING: certbot failed for rakuensoft.com (DNS may not be pointed yet)" >&2
-        failed=1
-    fi
+        args=()
+        while IFS= read -r d; do
+            [[ -n "$d" ]] && args+=(-d "$d")
+        done < <(tr ',' '\n' <<< "$domains")
 
-    # certbot installs a systemd timer for automatic renewal
+        # --keep-until-expiring keeps this idempotent, so re-running does
+        # not burn Let's Encrypt rate limits on still-valid certificates.
+        if certbot certonly --non-interactive --agree-tos \
+            --email "$CERTBOT_EMAIL" \
+            --dns-cloudflare \
+            --dns-cloudflare-credentials "$CF_CREDENTIALS" \
+            --dns-cloudflare-propagation-seconds 30 \
+            --keep-until-expiring \
+            --cert-name "$name" \
+            "${args[@]}"; then
+            info "Certificate obtained for ${name} (${domains})"
+        else
+            echo "WARNING: certbot failed for ${name}" >&2
+            failed=1
+        fi
+    done
+
+    install_deploy_hook
     systemctl enable certbot.timer
     systemctl start certbot.timer
 
@@ -454,18 +517,101 @@ obtain_certificates() {
         cat >&2 <<WARN
 
 ================================================================
-One or more certbot requests failed. This is expected if DNS is
-not yet pointed at $LAN_IP. Once DNS is live, re-run:
+One or more certificate requests failed.
 
-  certbot --nginx -d ackmud.com -d www.ackmud.com -d aha.ackmud.com
-  certbot --nginx -d bailes.us -d www.bailes.us
-  certbot --nginx -d rakuensoftware.com -d www.rakuensoftware.com
-  certbot --nginx -d rakuensoft.com -d www.rakuensoft.com
+With DNS-01 this is NOT about port forwarding -- it means the zone could
+not be edited with the supplied Cloudflare token. Check that:
 
-Or re-run this script with --deploy-only.
+  - the domain's DNS is hosted at Cloudflare, and
+  - the token in ${CF_CREDENTIALS} has Zone:DNS:Edit on that zone.
+
+Re-run with --deploy-only once corrected.
 ================================================================
 WARN
     fi
+}
+
+# Distribute the wildcard to internal services after renewal.
+#
+# Without this the wildcard only ever lives on nginx-proxy and every other
+# internal service keeps serving a self-signed certificate.
+install_deploy_hook() {
+    info "Installing certificate distribution hook"
+
+    local hook_dir="/etc/letsencrypt/renewal-hooks/deploy"
+    local hook="${hook_dir}/distribute-wildcard.sh"
+    mkdir -p "$hook_dir"
+
+    {
+        cat <<'HOOKHEAD'
+#!/usr/bin/env bash
+# Managed by 06-setup-nginx-proxy.sh -- do not edit by hand.
+#
+# Runs after each successful renewal. Copies the wildcard certificate to
+# the internal services that consume it, then reloads them.
+#
+# certbot sets RENEWED_LINEAGE to the lineage that just renewed, so a
+# public-site renewal does not trigger a pointless fan-out.
+set -uo pipefail
+
+LINEAGE="${RENEWED_LINEAGE:-}"
+HOOKHEAD
+
+        echo "WILDCARD_LINEAGE=\"/etc/letsencrypt/live/${INTERNAL_ZONE}\""
+
+        cat <<'HOOKMID'
+
+[[ "$LINEAGE" == "$WILDCARD_LINEAGE" ]] || exit 0
+
+SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
+
+log() { logger -t cert-deploy "$*"; echo "cert-deploy: $*"; }
+
+deploy_to() {
+    local host="$1" dest="$2" reload="$3"
+
+    # shellcheck disable=SC2086
+    if ! ssh $SSH_OPTS "root@${host}" "mkdir -p ${dest}" 2>/dev/null; then
+        log "WARNING: ${host} unreachable, skipping"
+        return 1
+    fi
+
+    # shellcheck disable=SC2086
+    if scp $SSH_OPTS -q \
+        "${LINEAGE}/fullchain.pem" "${LINEAGE}/privkey.pem" \
+        "root@${host}:${dest}/" 2>/dev/null \
+        && ssh $SSH_OPTS "root@${host}" \
+            "chmod 0600 ${dest}/privkey.pem; chmod 0644 ${dest}/fullchain.pem; ${reload}" 2>/dev/null; then
+        log "deployed wildcard to ${host}"
+        return 0
+    fi
+
+    log "WARNING: failed to deploy to ${host}"
+    return 1
+}
+
+HOOKMID
+
+        echo 'CONSUMERS=('
+        local c
+        for c in "${CERT_CONSUMERS[@]}"; do
+            echo "    \"${c}\""
+        done
+        echo ')'
+
+        cat <<'HOOKTAIL'
+
+for entry in "${CONSUMERS[@]}"; do
+    IFS='|' read -r host dest reload <<< "$entry"
+    deploy_to "$host" "$dest" "$reload" || true
+done
+
+exit 0
+HOOKTAIL
+    } > "$hook"
+
+    chmod 0755 "$hook"
+    info "Deploy hook installed (distributes the wildcard on renewal)"
 }
 
 # ---------------------------------------------------------------------------

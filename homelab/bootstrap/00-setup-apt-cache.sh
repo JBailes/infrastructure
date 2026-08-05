@@ -9,17 +9,17 @@
 #   ./00-setup-apt-cache.sh --deploy-only  # Re-run configuration on existing CT
 #   ./00-setup-apt-cache.sh --configure    # (internal) Run inside the container
 #
-# Creates a tri-homed Debian 13 LXC (CT 115):
-#   eth0 = 192.168.1.115/23 on vmbr0 (LAN, for fetching packages)
-#   eth1 = 10.0.0.115/20 on vmbr1 (WOL private network, serves cached packages)
-#   eth2 = 10.1.0.115/24 on vmbr2 (ACK private network, serves cached packages)
+# Creates a dual-homed Debian 13 LXC (CT 115):
+#   eth0 = 192.168.1.115/23 on vmbr0 (LAN, fetches and serves packages)
+#   eth1 = 10.1.0.115/24 on vmbr2 (ACK private network, serves cached packages)
 #
-# Provides an apt package cache for all homelab, WOL, and ACK hosts.
-# apt-cacher-ng caches .deb packages on first download and serves them
-# from cache on subsequent requests.
+# Provides an apt package cache for homelab and ACK hosts. apt-cacher-ng
+# caches .deb packages on first download and serves them from cache on
+# subsequent requests.
 #
-# After this script: all other hosts should configure apt to use
-# http://10.0.0.115:3142 as their proxy.
+# After this script: LAN hosts configure apt to use
+# http://apt-cache.bailes.us:3142 as their proxy. ACK hosts have no internal
+# DNS, so they use http://10.1.0.115:3142 directly.
 
 set -euo pipefail
 
@@ -35,24 +35,27 @@ configure() {
 
     rm -f /root/.env.bootstrap
 
-    INTERNAL_IP="10.0.0.115"
     EXTERNAL_IP="192.168.1.115"
     ACK_IP="10.1.0.115"
-    PRIVATE_NET="10.0.0.0/20"
     ACK_NET="10.1.0.0/24"
     LAN_NET="192.168.0.0/23"
     CACHE_PORT="3142"
+    DNS_IP="192.168.1.149"
+    INTERNAL_ZONE="bailes.us"
 
     [[ $EUID -eq 0 ]] || err "Run as root"
 
-    # -- Network (tri-homed: external DNS for fetching, internal for hostnames)
+    # -- Network (dual-homed: LAN for fetching, ACK network for serving)
     configure_network() {
         info "Configuring DNS and NTP"
+        # Internal DNS first (resolves *.bailes.us and forwards the rest to
+        # the router); public resolvers as a fallback so package fetches keep
+        # working even if the dns host is down.
         cat > /etc/resolv.conf <<EOF
+search ${INTERNAL_ZONE}
+nameserver ${DNS_IP}
 nameserver 1.1.1.1
 nameserver 8.8.8.8
-nameserver 10.0.0.200
-nameserver 10.0.0.201
 EOF
 
         if command -v chronyc &>/dev/null; then
@@ -124,16 +127,15 @@ ACNG
         # Allow established/related connections
         iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
-        # SSH from private network
-        iptables -A INPUT -s "$PRIVATE_NET" -p tcp --dport 22 -j ACCEPT
+        # SSH from the LAN
+        iptables -A INPUT -s "$LAN_NET" -p tcp --dport 22 -j ACCEPT
 
-        # apt-cacher-ng from private network, ACK network, and LAN
-        iptables -A INPUT -s "$PRIVATE_NET" -p tcp --dport "$CACHE_PORT" -j ACCEPT
+        # apt-cacher-ng from the LAN and the ACK network
         iptables -A INPUT -s "$ACK_NET" -p tcp --dport "$CACHE_PORT" -j ACCEPT
         iptables -A INPUT -s "$LAN_NET" -p tcp --dport "$CACHE_PORT" -j ACCEPT
 
-        # Health check from private network and ACK network
-        iptables -A INPUT -s "$PRIVATE_NET" -p tcp --dport 8080 -j ACCEPT
+        # Health check from the LAN and the ACK network
+        iptables -A INPUT -s "$LAN_NET" -p tcp --dport 8080 -j ACCEPT
         iptables -A INPUT -s "$ACK_NET" -p tcp --dport 8080 -j ACCEPT
 
         info "iptables firewall configured"
@@ -175,7 +177,7 @@ SERVICE
     }
 
     # -- Run in-container setup
-    info "Setting up apt-cache package cache (${INTERNAL_IP})"
+    info "Setting up apt-cache package cache (${EXTERNAL_IP})"
 
     configure_network
     install_packages
@@ -186,18 +188,19 @@ SERVICE
     cat <<EOF
 
 ================================================================
-apt-cache setup complete (${INTERNAL_IP}:${CACHE_PORT}).
+apt-cache setup complete (apt-cache.${INTERNAL_ZONE}:${CACHE_PORT}).
 
 apt-cacher-ng caches .deb packages for all internal hosts.
-Other HTTP/HTTPS traffic goes directly through gateway NAT.
+Other HTTP/HTTPS traffic goes directly through the router.
 
 Networks served:
-  WOL:  ${INTERNAL_IP}:${CACHE_PORT} (vmbr1)
-  ACK:  ${ACK_IP}:${CACHE_PORT} (vmbr2)
   LAN:  ${EXTERNAL_IP}:${CACHE_PORT} (vmbr0)
+  ACK:  ${ACK_IP}:${CACHE_PORT} (vmbr2)
 
-All hosts should set:
-  Acquire::http::Proxy "http://<apt-cache-ip>:${CACHE_PORT}";
+LAN hosts should set:
+  Acquire::http::Proxy "http://apt-cache.${INTERNAL_ZONE}:${CACHE_PORT}";
+ACK hosts (no internal DNS) should set:
+  Acquire::http::Proxy "http://${ACK_IP}:${CACHE_PORT}";
 ================================================================
 EOF
 }
@@ -218,11 +221,9 @@ host_main() {
 
     if [[ $deploy_only -eq 0 ]]; then
         if create_lxc "$ctid" "$hostname" "$ip" 512 1 32 "$ROUTER_GW" "no"; then
-            # Add WOL private network (tri-homed)
-            pct set "$ctid" --net1 "name=eth1,bridge=${PRIVATE_BRIDGE},ip=10.0.0.115/20"
-            # Add ACK private network
-            pct set "$ctid" --net2 "name=eth2,bridge=${ACK_BRIDGE},ip=10.1.0.115/24"
-            info "Tri-homing configured: net1 on ${PRIVATE_BRIDGE} (10.0.0.115/20), net2 on ${ACK_BRIDGE} (10.1.0.115/24)"
+            # Add ACK private network (dual-homed: LAN + ACK)
+            pct set "$ctid" --net1 "name=eth1,bridge=${ACK_BRIDGE},ip=10.1.0.115/24"
+            info "Dual-homing configured: net1 on ${ACK_BRIDGE} (10.1.0.115/24)"
 
             pct start "$ctid"
             info "CREATED: CT $ctid ($hostname) at $ip"

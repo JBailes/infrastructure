@@ -135,60 +135,24 @@ configure_blackbox_scrape() {
       - targets: ['http://192.168.1.109:8096/emby/system/info/public']
         labels:
           name: emby
-      - targets: ['http://192.168.1.120:47989/pin/']
+      - targets: ['http://wolf.bailes.us:47989/pin/']
         labels:
           name: wolf
-      - targets: ['http://192.168.1.120:8080']
+      - targets: ['http://wolf.bailes.us:8080']
         labels:
           name: wolf-den
-      - targets: ['http://192.168.1.116:8080']
+      - targets: ['http://bittorrent.bailes.us:8080']
         labels:
           name: bittorrent
-      - targets: ['http://192.168.1.119:9696/ping']
-        labels:
-          name: prowlarr
-      - targets: ['http://192.168.1.119:8989/ping']
-        labels:
-          name: sonarr
-      - targets: ['http://192.168.1.119:8990/ping']
-        labels:
-          name: sonarr-anime
-      - targets: ['http://192.168.1.119:7878/ping']
-        labels:
-          name: radarr
-      - targets: ['http://192.168.1.119:8686/ping']
-        labels:
-          name: lidarr
-      - targets: ['http://192.168.1.119:8787/ping']
-        labels:
-          name: readarr
-      - targets: ['http://192.168.1.117:3000']
+      - targets: ['http://personal-web.bailes.us:3000']
         labels:
           name: personal-web
-      - targets: ['http://192.168.1.118/health']
+      - targets: ['http://nginx-proxy.bailes.us/health']
         labels:
           name: nginx-proxy
-      - targets: ['http://10.0.0.115:8080/health']
+      - targets: ['http://apt-cache.bailes.us:8080/health']
         labels:
           name: apt-cache
-      - targets: ['http://10.0.0.204:8080/ready']
-        labels:
-          name: spire-server
-      - targets: ['http://10.0.0.209:5000/health']
-        labels:
-          name: wol-web
-      - targets: ['http://10.0.0.210:8443/health']
-        labels:
-          name: wol-realm-prod
-      - targets: ['http://10.0.1.215:8443/health']
-        labels:
-          name: wol-realm-test
-      - targets: ['http://10.0.0.212:8443/health']
-        labels:
-          name: wol-ai-prod
-      - targets: ['http://10.0.1.217:8443/health']
-        labels:
-          name: wol-ai-test
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target
@@ -226,15 +190,6 @@ configure_blackbox_scrape() {
     params:
       module: [tcp_connect]
     static_configs:
-      - targets: ['10.0.0.200:53']
-        labels:
-          name: wol-gateway-a
-      - targets: ['10.0.0.201:53']
-        labels:
-          name: wol-gateway-b
-      - targets: ['10.0.0.208:6969']
-        labels:
-          name: wol-a
       - targets: ['10.1.0.240:53']
         labels:
           name: ack-gateway
@@ -370,7 +325,7 @@ YAML
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "probe_success{job=\"blackbox\", name=~\"prowlarr|sonarr|sonarr-anime|radarr|lidarr|readarr\"}",
+          "expr": "probe_success{job=\"blackbox\"}",
           "legendFormat": "{{name}}"
         }
       ],
@@ -864,7 +819,7 @@ Blackbox probes added for:
   - ackfuss (10.1.0.250:4000, TCP)
   - deploy (192.168.1.101:2222, TCP)
 
-Open Grafana at http://192.168.1.100 to view.
+Open Grafana at http://obs.bailes.us to view.
 ================================================================
 EOF
 }
