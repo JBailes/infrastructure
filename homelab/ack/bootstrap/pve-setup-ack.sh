@@ -286,8 +286,11 @@ bootstrap() {
 
         # Source patches the upstream archive repos have not merged yet.
         pct exec "$ctid" -- mkdir -p /root/ack-patches
-        pct push "$ctid" "$SCRIPT_DIR/../patches/apply-shield-wearoff-segv.py" \
-            /root/ack-patches/apply-shield-wearoff-segv.py --perms 0755
+        for _patch in "$SCRIPT_DIR"/../patches/apply-*.py; do
+            [[ -f "$_patch" ]] || continue
+            pct push "$ctid" "$_patch" \
+                "/root/ack-patches/$(basename "$_patch")" --perms 0755
+        done
         local repo_env=""
         [[ -n "$repo" ]] && repo_env="MUD_REPO=$repo"
         pct exec "$ctid" -- bash -c "DEBIAN_FRONTEND=noninteractive TERM=dumb MUD_NAME=$name MUD_IP=$ip MUD_PORT=$port $repo_env /root/01-setup-ack-mud.sh"

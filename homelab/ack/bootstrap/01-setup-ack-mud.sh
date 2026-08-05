@@ -149,19 +149,23 @@ clone_source() {
 # patch is idempotent and a no-op once upstream merges the fix, so this can
 # stay in place until every repo is updated. See homelab/ack/patches/README.md.
 apply_patches() {
-    local patch_script="/root/ack-patches/apply-shield-wearoff-segv.py"
-    [[ -x "$patch_script" ]] || { info "No source patches to apply"; return; }
+    local patch_dir="/root/ack-patches"
+    [[ -d "$patch_dir" ]] || { info "No source patches to apply"; return; }
 
-    # Locate the tree containing handler.c (layout varies per repo).
+    # Locate the tree containing the sources (layout varies per repo).
     local src_dir
-    src_dir=$(dirname "$(find /opt/mud -name handler.c -not -path '*/.git/*' 2>/dev/null | head -1)")
+    src_dir=$(dirname "$(find /opt/mud -name db.c -not -path '*/.git/*' 2>/dev/null | head -1)")
     if [[ -z "$src_dir" || ! -d "$src_dir" ]]; then
-        info "No handler.c found, skipping source patches"
+        info "No source tree found, skipping patches"
         return
     fi
 
     info "Applying source patches to ${src_dir}"
-    python3 "$patch_script" "$src_dir" || err "Source patch failed"
+    local p
+    for p in "$patch_dir"/apply-*.py; do
+        [[ -x "$p" ]] || continue
+        python3 "$p" "$src_dir" || err "Source patch failed: $(basename "$p")"
+    done
 }
 
 build_source() {

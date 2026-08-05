@@ -7,6 +7,76 @@ Each patch is **idempotent** and becomes a **no-op** once upstream carries the
 fix, so these can stay in place indefinitely. `01-setup-ack-mud.sh` runs them
 from `build_source()` before compiling.
 
+## apply-bug-eof-hang.py
+
+Fixes a permanent hang on boot when a data file is truncated.
+
+### Symptom
+
+`assault30` hung during boot, every time, at `Loading ../data/objects.lst`.
+Process alive, socket bound, accept queue filling and never drained — systemd
+reported the unit `active` throughout. It had been down for six days before
+anyone noticed, and re-hung immediately each time the watchdog restarted it.
+
+### Cause
+
+`bug()` reports which line of a data file went wrong by rewinding and counting
+newlines:
+
+```c
+for ( iLine = 0; ftell( fpArea ) < iChar; iLine++ )
+{
+    while ( getc( fpArea ) != '\n' )   /* never checks EOF */
+        ;
+}
+```
+
+Neither loop checks for EOF. The inner `while` compares only against `'\n'`,
+so at end-of-file `getc()` returns `EOF` forever and it never terminates. The
+outer `for` is guarded by `ftell() < iChar`, and `ftell()` stops advancing at
+EOF, so it would spin as well.
+
+`bug()` is very often called *because* something hit EOF — a truncated file —
+which is exactly when the file pointer is already at the end. **The error
+reporter deadlocks the process precisely when there is an error to report.**
+
+Confirmed with gdb on the live hung process:
+
+```
+#0 bug (str="Fread_string: EOF")  at db.c:1751
+#2 _fread_string (...)            at ssm.c:423
+#3 fread_object (...)             at save.c:1515
+#4 load_sobjects (mode=1)         at db.c:1933
+#5 boot_db (...)                  at db.c:391
+```
+
+with `rax = 0xffffffff` — `getc()` returning `EOF`.
+
+### Fix
+
+Stop both loops at EOF. The reported line number may be short on a truncated
+file; a slightly wrong line number beats a hung server.
+
+This does **not** repair the corrupt data file — it makes the failure logged
+and survivable instead of silent and fatal. With the fix applied, assault30
+reported the real fault immediately:
+
+```
+[*****] FILE: ../data/objects.lst LINE: 1592
+[*****] BUG: Fread_string: EOF
+```
+
+`objects.lst` had a final record truncated mid-string (no `~`, no trailing
+newline) at exactly 196 KiB — a write cut off at a block boundary. Dropping
+the incomplete trailing record brought the MUD back.
+
+### Affected repos
+
+Present in **5 of 6** archive codebases: `ackmud431`, `ackmud42`, `ackmud41`,
+`Assault3.0`, `ACKFUSS`. Only `acktng` is clean. Two occurrences per `db.c`.
+
+---
+
 ## apply-shield-wearoff-segv.py
 
 Fixes a SIGSEGV on magic-shield expiry.
