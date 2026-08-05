@@ -12,9 +12,15 @@ warn() { echo "WARN: $*" >&2; }
 # Proxmox infrastructure defaults
 # ---------------------------------------------------------------------------
 
-IMAGE_STORAGE="${IMAGE_STORAGE:-isos}"
+# Storage names must match `pvesm status` on the node. These were previously
+# "isos" and "fast", neither of which exists -- container creation would have
+# failed. Verified against the live node:
+#   local   dir     vztmpl,iso,backup   -> templates and cloud images
+#   optane  zfspool images,rootdir      -> where the containers actually live
+IMAGE_STORAGE="${IMAGE_STORAGE:-local}"
+IMAGE_STORAGE_PATH="${IMAGE_STORAGE_PATH:-/var/lib/vz}"
 TEMPLATE="${TEMPLATE:-${IMAGE_STORAGE}:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst}"
-STORAGE="${STORAGE:-fast}"
+STORAGE="${STORAGE:-optane}"
 LAN_BRIDGE="vmbr0"
 LAN_CIDR=23
 ROUTER_GW="192.168.1.1"
@@ -105,7 +111,7 @@ resolve_host() {
 VPN_GATEWAY_HOST="vpn-gateway.${INTERNAL_ZONE}"
 CLOUD_IMAGE_FILENAME="debian-13-genericcloud-amd64.qcow2"
 CLOUD_IMAGE_URL="https://cloud.debian.org/images/cloud/trixie/latest/${CLOUD_IMAGE_FILENAME}"
-CLOUD_IMAGE_PATH="/mnt/pve/${IMAGE_STORAGE}/template/iso/${CLOUD_IMAGE_FILENAME}"
+CLOUD_IMAGE_PATH="${IMAGE_STORAGE_PATH}/template/iso/${CLOUD_IMAGE_FILENAME}"
 
 # Find the first free CTID >= start by querying Proxmox
 next_free_ctid() {
@@ -164,6 +170,7 @@ create_lxc() {
         --searchdomain "$INTERNAL_ZONE" \
         $priv_flag \
         --features nesting=1 \
+        --onboot 1 \
         "$@" \
         --start 0; then
         err "Failed to create CT $ctid ($hostname)"

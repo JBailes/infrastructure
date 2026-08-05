@@ -44,8 +44,8 @@ BRIDGE="vmbr2"
 # Keep the Proxmox host bridge IP distinct from the ACK gateway container IP
 # (gateway uses 10.1.0.240 on eth1). Using .254 avoids ARP/IP conflicts.
 BRIDGE_IP="10.1.0.254/24"
-STORAGE="${STORAGE:-fast}"
-IMAGE_STORAGE="${IMAGE_STORAGE:-isos}"
+STORAGE="${STORAGE:-optane}"
+IMAGE_STORAGE="${IMAGE_STORAGE:-local}"
 TEMPLATE="${IMAGE_STORAGE}:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst"
 SSH_KEY="/root/.ssh/id_ed25519.pub"
 
