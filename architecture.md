@@ -55,6 +55,8 @@ graph TB
     PLAYERS -->|":80/:443"| NGINX
     NGINX -->|"proxy"| ACKWEB
     NGINX -->|"proxy"| PWEB
+    NGINX -->|"proxy"| RWEB
+    NGINX -.->|"resolves backends"| DNS
     PLAYERS -->|":8890-8894"| ACKGW
     ACKGW -->|"DNAT"| MUDS
     MUDS -->|"PostgreSQL"| ACKDB
