@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # 07-setup-personal-web.sh -- Create and configure the personal website LXC
 #
-# Runs on: the Proxmox host (creates CT 117, then configures it)
+# Runs on: the Proxmox host (creates CT 106, then configures it)
 #
 # Usage:
 #   ./07-setup-personal-web.sh               # Create CT and configure
 #   ./07-setup-personal-web.sh --deploy-only  # Re-run configuration on existing CT
 #   ./07-setup-personal-web.sh --configure    # (internal) Run inside the container
 #
-# Creates a Debian 13 LXC (CT 117) single-homed on the LAN:
-#   eth0 = 192.168.1.117/23 on vmbr0
+# Creates a Debian 13 LXC (CT 106) single-homed on the LAN:
+#   eth0 on vmbr0
 #
 # Serves bailes.us as a static site via node serve on :3000.
-# nginx-proxy (192.168.1.118) handles TLS termination and proxies here.
+# nginx-proxy (CT 105) handles TLS termination and reaches this container by
+# name (personal-web.bailes.us), so renumbering it is a DNS change.
 
 set -euo pipefail
 
@@ -23,13 +24,18 @@ _LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/nu
 # Container specification
 # ---------------------------------------------------------------------------
 
-CTID=117
+CTID=106
 HOSTNAME="personal-web"
-LAN_IP="192.168.1.117"
-RAM=256
-CORES=1
+LAN_IP="192.168.1.106"
+RAM=1024
+CORES=2
 DISK=4
 PRIVILEGED="no"
+
+# The dns container (CT 101) serves the bailes.us zone. nginx-proxy looks this
+# container up there, so the record has to match LAN_IP above.
+DNS_IP="192.168.1.101"
+SEARCH_DOMAIN="bailes.us"
 
 err()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
@@ -41,7 +47,13 @@ info() { echo "==> $*"; }
 host_main() {
     info "Creating personal-web container (CTID $CTID)"
 
+    # create_lxc does not set onboot, so pass it explicitly -- otherwise the site
+    # does not come back after a host reboot. Same reason 13-setup-rakuen-web.sh
+    # passes it.
     create_lxc "$CTID" "$HOSTNAME" "$LAN_IP" "$RAM" "$CORES" "$DISK" "$ROUTER_GW" "$PRIVILEGED" \
+        --nameserver "$DNS_IP" \
+        --searchdomain "$SEARCH_DOMAIN" \
+        --onboot 1 \
     || { info "Container already exists, deploying config"; }
 
     pct start "$CTID" 2>/dev/null || true
@@ -72,11 +84,11 @@ configure() {
     cat <<EOF
 
 ================================================================
-personal-web is ready.
+personal-web is ready (CT $CTID).
 
-IP:   $LAN_IP (eth0, vmbr0)
+Net:  eth0 on vmbr0, resolvable as $HOSTNAME.$SEARCH_DOMAIN
 Site: bailes.us (static files via node serve on :3000)
-TLS:  handled by nginx-proxy (192.168.1.118)
+TLS:  handled by nginx-proxy (CT 105)
 
 Firewall: :3000 from LAN (192.168.0.0/23), SSH from LAN
 ================================================================

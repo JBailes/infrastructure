@@ -47,9 +47,10 @@ All CTIDs are static. IPs follow the convention `X.X.X.{CTID}` on each network.
 | vpn-gateway | 104 | 192.168.1.104 |
 | apt-cache | 115 | 192.168.1.115 (LAN), 10.0.0.115 (WOL), 10.1.0.115 (ACK) |
 | bittorrent | 116 | 192.168.1.116 |
-| personal-web | 117 | 192.168.1.117 |
-| rakuen-web | 121 | 192.168.1.121 |
-| nginx-proxy | 118 | 192.168.1.118 (LAN), 10.0.0.118 (WOL), 10.1.0.118 (ACK) |
+| dns | 101 | 192.168.1.101 |
+| personal-web | 106 | 192.168.1.106 |
+| rakuen-web | 107 | 192.168.1.107 |
+| nginx-proxy | 105 | 192.168.1.105 (LAN), 10.1.0.118 (ACK) |
 | media-stack | 119 | 192.168.1.119 |
 | qwen103 | 103 | 192.168.1.103 |
 
@@ -195,49 +196,65 @@ LXC containers, or via `scp`/`ssh` for the vpn-gateway VM.
 
 ---
 
-## 06 - Nginx Proxy (CTID 118, 192.168.1.118 / 10.0.0.118 / 10.1.0.118)
+## 06 - Nginx Proxy (CTID 105)
 
-Tri-homed LXC container running nginx as a central reverse proxy for all web
+Dual-homed LXC container running nginx as a central reverse proxy for all web
 sites. Handles TLS termination via certbot and routes by Host header:
 
 - **ackmud.com** -> ack-web (10.1.0.247:5000) via ACK network
-- **bailes.us** -> personal-web (192.168.1.117:3000) via LAN
-- **rakuensoftware.com** -> rakuen-web (192.168.1.121:3000) via LAN
+- **bailes.us** -> personal-web.bailes.us:3000 (CT 106) via LAN
+- **rakuensoftware.com** -> rakuen-web.bailes.us:3000 (CT 107) via LAN
 - **rakuensoft.com** -> 301 redirect to rakuensoftware.com
 
 Also proxies legacy MUD WebSocket traffic (ports 18890, 8891, 8892) to ack-web
 via TCP stream blocks.
 
-- **eth0**: 192.168.1.118/23 on vmbr0 (LAN, incoming HTTPS from router)
-- **eth1**: 10.0.0.118/20 on vmbr1 (WOL/shared infrastructure reachability)
-- **eth2**: 10.1.0.118/24 on vmbr2 (ACK, reach ack-web)
+- **eth0**: on vmbr0 (LAN, incoming HTTPS from router)
+- **eth1**: on vmbr2 (ACK, reach ack-web)
 
 Backend servers run only their app server (node or service runtime) with no
 nginx or TLS of their own. All certificate management is centralized here.
 
+LAN backends are addressed by DNS name, resolved through the dns container
+(CT 101). Two things follow, and both matter:
+
+- Renumbering a backend is a DNS change, not an edit to this proxy.
+- The vhosts go through a `resolver` and a variable rather than naming the
+  backend directly in `proxy_pass`. A literal name is resolved while nginx
+  parses its config, so a resolver that is not answering yet -- as on a cold
+  boot, where this container and the dns container start together -- is a fatal
+  config error. nginx then stays down and takes *every* site on this proxy with
+  it. A `Restart=on-failure` drop-in covers the same class of startup failure.
+  Both exist because that outage happened.
+
+ack-web keeps a literal address: it lives on the ACK bridge, which the bailes.us
+zone does not cover.
+
 ---
 
-## 07 - Personal Web (CTID 117, 192.168.1.117)
+## 07 - Personal Web (CTID 106)
 
 Single-homed LXC on the home LAN running a static file server (node serve) on
 port 3000 for bailes.us.
 
-- **eth0**: 192.168.1.117/23 on vmbr0
-- TLS termination handled by nginx-proxy (192.168.1.118)
+- **eth0**: on vmbr0, resolvable as `personal-web.bailes.us`
+- TLS termination handled by nginx-proxy (CT 105)
 - Firewall: :3000 from LAN (nginx-proxy connects here), SSH from LAN
+- Created with `--onboot 1`, or the site does not come back after a host reboot.
 
 ---
 
-## 13 - Rakuen Web (CTID 121, 192.168.1.121)
+## 13 - Rakuen Web (CTID 107)
 
 Single-homed LXC on the home LAN running a static file server (node serve) on
 port 3000 for rakuensoftware.com.
 
-- **eth0**: 192.168.1.121/23 on vmbr0
-- TLS termination handled by nginx-proxy (192.168.1.118)
+- **eth0**: on vmbr0, resolvable as `rakuen-web.bailes.us`
+- TLS termination handled by nginx-proxy (CT 105)
 - Firewall: :3000 from LAN (nginx-proxy connects here), SSH from LAN
+- Created with `--onboot 1`, or the site does not come back after a host reboot.
 - Sized 1024MB / 2 cores / 8GB: the site is a Vite + React SPA built
-  in-container, which OOMs at personal-web's 256MB.
+  in-container, which OOMs below 1GB.
 - Serves with `serve -s`, which rewrites unknown paths to index.html. The site
   is a single-page app, so without that flag /blog 404s on a hard refresh.
 

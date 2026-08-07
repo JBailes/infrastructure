@@ -16,9 +16,10 @@ graph TB
             ROUTER["Router<br/>192.168.1.1"]
             VPN["vpn-gateway<br/>192.168.1.104"]
             BT["bittorrent<br/>192.168.1.116"]
-            NGINX["nginx-proxy<br/>192.168.1.118<br/>tri-homed"]
-            PWEB["personal-web<br/>192.168.1.117"]
-            RWEB["rakuen-web<br/>192.168.1.121"]
+            DNS["dns<br/>192.168.1.101<br/>bailes.us zone"]
+            NGINX["nginx-proxy<br/>192.168.1.105<br/>dual-homed"]
+            PWEB["personal-web<br/>192.168.1.106"]
+            RWEB["rakuen-web<br/>192.168.1.107"]
         end
 
         subgraph VMBR1["vmbr1 -- WOL Prod (10.0.0.0/24)"]
@@ -111,11 +112,12 @@ General-purpose services on the home LAN, independent of WOL.
 - **bittorrent** (192.168.1.116) -- qBittorrent-nox with triple-layer VPN enforcement (routing, iptables, watchdog). Downloads to NAS via NFS.
 - **apt-cache** (192.168.1.115) -- quad-homed package cache, described below.
 - **obs** (192.168.1.100) -- tri-homed observability stack (Loki, Prometheus, Grafana, Alertmanager), described below.
-- **nginx-proxy** (192.168.1.118) -- tri-homed nginx reverse proxy with certbot TLS. Routes ackmud.com, aha.ackmud.com, bailes.us, rakuensoftware.com, and the rakuensoft.com redirect to their respective backends across all three networks.
-- **deploy** (192.168.1.101) -- quad-homed deployment container. GitHub Actions SSHs in on :2222 to build and deploy artifacts across all networks. Key-only auth, GitHub IP allowlist.
-- **personal-web** (192.168.1.117) -- static file server (node serve on :3000) for bailes.us.
+- **nginx-proxy** (CT 105) -- dual-homed nginx reverse proxy with certbot TLS. Routes ackmud.com, aha.ackmud.com, bailes.us, rakuensoftware.com, and the rakuensoft.com redirect to their respective backends. LAN backends are addressed by DNS name, so renumbering one is a DNS change rather than a proxy edit.
+- **dns** (CT 101) -- serves the `bailes.us` zone. Every container is created pointing at it, which is what lets services address each other by name. nginx-proxy depends on it to resolve its backends.
+- **deploy** (CT 109) -- quad-homed deployment container. GitHub Actions SSHs in on :2222 to build and deploy artifacts across all networks. Key-only auth, GitHub IP allowlist.
+- **personal-web** (CT 106) -- static file server (node serve on :3000) for bailes.us.
 
-- **rakuen-web** (192.168.1.121) -- static file server (node serve on :3000) for rakuensoftware.com. Builds the Vite/React site in-container.
+- **rakuen-web** (CT 107) -- static file server (node serve on :3000) for rakuensoftware.com. Builds the Vite/React site in-container.
 - **wolf** (192.168.1.120) -- Wolf cloud gaming for Moonlight-compatible game streaming. Privileged LXC with GPU passthrough.
 - **qwen103** (192.168.1.103) -- llama.cpp (Vulkan) LLM inference with AMD 7900XTX. Qwen3.6-27B Q4_K_M at 128k context. OpenAI-compatible API on :8080.
 
@@ -201,11 +203,12 @@ Each network has its own gateway(s) for NAT and DNS. They are independent and do
 | obs | 192.168.1.100 | 100 | LXC (tri-homed) | Loki + Prometheus + Grafana + Alertmanager |
 | vpn-gateway | 192.168.1.104 | 104 | VM (cloud-init) | OpenVPN gateway with kill switch |
 | bittorrent | 192.168.1.116 | 116 | LXC | qBittorrent-nox, VPN-enforced |
-| personal-web | 192.168.1.117 | 117 | LXC | Static file server for bailes.us (:3000) |
+| dns | 192.168.1.101 | 101 | LXC | Authoritative DNS for the `bailes.us` zone |
+| personal-web | 192.168.1.106 | 106 | LXC | Static file server for bailes.us (:3000) |
 | media-stack | 192.168.1.119 | 119 | LXC | Media automation stack (Prowlarr, Sonarr, Radarr, Lidarr, Readarr) |
-| rakuen-web | 192.168.1.121 | 121 | LXC | Static file server for rakuensoftware.com (:3000) |
-| nginx-proxy | 192.168.1.118 | 118 | LXC (tri-homed) | nginx reverse proxy + certbot TLS for all web sites |
-| deploy | 192.168.1.101 | 101 | LXC (quad-homed) | GitHub Actions deployment (SSH :2222, builds + deploys) |
+| rakuen-web | 192.168.1.107 | 107 | LXC | Static file server for rakuensoftware.com (:3000) |
+| nginx-proxy | 192.168.1.105 | 105 | LXC (dual-homed) | nginx reverse proxy + certbot TLS for all web sites |
+| deploy | 192.168.1.109 | 109 | LXC (quad-homed) | GitHub Actions deployment (SSH :2222, builds + deploys) |
 | wolf | 192.168.1.120 | 120 | LXC (privileged) | Wolf cloud gaming (Moonlight streaming) |
 | qwen103 | 192.168.1.103 | 103 | LXC (privileged) | llama.cpp (Vulkan) LLM inference, AMD 7900XTX GPU (:8080) |
 
@@ -231,6 +234,8 @@ Each network has its own gateway(s) for NAT and DNS. They are independent and do
 Environments are bootstrapped independently but share one dependency: **apt-cache must exist first** for fast package installs.
 
 1. **Homelab** (`homelab/bootstrap/`) -- apt-cache (00), vpn-gateway (01), bittorrent (02), obs (03), nginx-proxy (06), personal-web (07), deploy (09), rakuen-web (13). obs must be deployed before WOL Promtail steps. deploy depends on all networks existing. No dependencies on ACK.
+
+   nginx-proxy (06) is the exception to running these in order: its vhosts name their backends, so it needs the dns container (CT 101) serving the `bailes.us` zone with records for personal-web and rakuen-web already in place. It checks this and refuses to configure rather than writing a config that will not parse. The dns container is not part of this bootstrap set.
 2. **WOL** (`wol/proxmox/pve-deploy.sh`) -- 21-step orchestrated bootstrap. Gateways first, then PKI, then services. Two mandatory operator checkpoints for offline root CA signing. See [wol/hosts.md](wol/hosts.md) for the full sequence.
 3. **ACK** (`homelab/ack/bootstrap/pve-setup-ack.sh`) -- creates bridge, containers, and bootstraps gateway + ack-db + MUD servers + ack-web + tng-ai + tngdb. No dependency on WOL.
 
