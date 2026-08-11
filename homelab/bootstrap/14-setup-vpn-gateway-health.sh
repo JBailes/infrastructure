@@ -21,8 +21,9 @@
 # OpenVPN can come up with a broken ovpn-dco data channel. Because the config
 # sets persist-tun, tun0 and its routes stay in place while nothing flows, so
 # the tunnel looks healthy and nothing recovers it -- one such outage ran from
-# 2026-08-07 to 2026-08-11 unnoticed. The check judges liveness by
-# authenticated bytes advancing in OpenVPN's status file.
+# 2026-08-07 to 2026-08-11 unnoticed. The check judges liveness by tun0's RX
+# byte counter advancing, and separately samples real throughput -- a tunnel
+# can be up and routed while carrying almost nothing.
 #
 # It also re-applies NAT and the kill switch on every run. There is no
 # iptables-persistent on the gateway, so those rules do not survive a reboot;
@@ -41,6 +42,11 @@ UNIT="vpn-gateway-health"
 [[ -f "$PAYLOAD" ]] || err "Missing payload: $PAYLOAD"
 
 GW_SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@${VPN_GATEWAY_IP}")
+
+# Resolved here because the gateway cannot look up Proxmox guests itself.
+DNS_ADDR="$(host_ip "$DNS_HOST" 2>/dev/null || echo "$ROUTER_GW")"
+DNS_ZONE="${DNS_ZONE:-bailes.us}"
+export DNS_ADDR DNS_ZONE
 
 "${GW_SSH[@]}" true 2>/dev/null \
     || err "Cannot SSH to the VPN gateway at $VPN_GATEWAY_IP"
@@ -94,6 +100,29 @@ UNITFILE
     systemctl enable --now ${UNIT}.timer
 "
 
+info "Applying gateway tuning"
+"${GW_SSH[@]}" "
+    # BitTorrent opens far more concurrent flows than the default table holds.
+    # This host shipped with nf_conntrack_max=8192, which is not enough to NAT
+    # a busy torrent client.
+    if [[ \"\$(cat /proc/sys/net/netfilter/nf_conntrack_max)\" -lt 131072 ]]; then
+        sysctl -w net.netfilter.nf_conntrack_max=131072 >/dev/null
+        printf 'net.netfilter.nf_conntrack_max = 131072\n' > /etc/sysctl.d/99-conntrack.conf
+        echo '  raised nf_conntrack_max to 131072'
+    fi
+
+    # Clients behind this gateway use its dnsmasq as their resolver, and it
+    # forwards everything upstream through the tunnel. Without this the local
+    # zone does not resolve for them -- which matters for the bittorrent host,
+    # whose firewall deliberately blocks DNS to anything except this gateway,
+    # so it cannot query the LAN resolver directly.
+    if [[ ! -f /etc/dnsmasq.d/local-zone.conf ]]; then
+        printf 'server=/%s/%s\n' '${DNS_ZONE}' '${DNS_ADDR}' > /etc/dnsmasq.d/local-zone.conf
+        systemctl restart dnsmasq
+        echo '  dnsmasq now forwards ${DNS_ZONE} to ${DNS_ADDR}'
+    fi
+"
+
 info "Verifying"
 "${GW_SSH[@]}" "
     ${REMOTE_BIN}
@@ -110,8 +139,9 @@ VPN gateway health check installed on $VPN_GATEWAY_IP.
 
 Checks every 60s and at boot:
   - tun0 present and tunnel routes installed
-  - authenticated bytes advancing in OpenVPN's status file
-  - NAT MASQUERADE and the FORWARD kill switch re-applied
+  - tun0 RX advancing (idle is distinguished from dead by an active probe)
+  - real throughput, sampled every 10th run
+  - NAT MASQUERADE, the FORWARD kill switch, and the TCP MSS clamp re-applied
 
 On failure it restarts routerd-vpn, with a 10 minute minimum between
 reconnects. It will NOT retry after AUTH_FAILED: the provider rate-limits

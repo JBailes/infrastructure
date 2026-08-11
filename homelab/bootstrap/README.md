@@ -572,3 +572,34 @@ accepted trade.
 ./15-setup-dns.sh --dry-run    # preview, change nothing
 ./15-setup-dns.sh --show       # list current records
 ```
+
+---
+
+## Known gaps
+
+Two things that are live but not reproducible from this repo.
+
+### `07-setup-selfheal.sh` is not in the repo
+
+The ACK containers each carry `/root/07-setup-selfheal.sh`, which drops a
+systemd override into `/etc/systemd/system/<unit>.service.d/selfheal.conf`
+setting `Restart=always` and `StartLimitIntervalSec=0`. That script was applied
+by hand and has no copy here, so this repo cannot rebuild those hosts exactly.
+
+It also had a real bug, fixed live on 2026-08-11. On `ack-db` the override was
+attached to `postgresql.service`, which is `Type=oneshot`; systemd refuses
+`Restart=` on oneshot units, so the unit failed to load with `bad-setting` and
+the cluster never started at boot. PostgreSQL had been down since 2026-08-05,
+with `tngdb` logging "Database not ready" the whole time and `acktng` stuck
+activating. The override now lives on `postgresql@.service`, which is the unit
+that actually runs a cluster.
+
+If that script is ever brought into the repo, it must skip `Type=oneshot`
+units rather than assuming every service takes `Restart=`.
+
+### qBittorrent settings are not provisioned
+
+Connection limits, the protocol setting and the rate limits are whatever is in
+the container's `qBittorrent.conf`. `02-setup-bittorrent.sh` writes that file
+only when it creates the container, so later changes made through the Web UI
+or the API are not captured here.
