@@ -9,13 +9,22 @@
 # the tunnel, not by the interface or routes existing.
 #
 # PROBE CHOICE
-# Do NOT probe by pinging a public address (e.g. NordVPN's DNS): those are
-# reachable through the home router too, so the probe passes with the tunnel
-# down. Do NOT use `ping -I tun0` either -- source-binding to a DCO device
-# fails even on a healthy tunnel. Instead read OpenVPN's own status file:
-# "Auth read bytes" counts authenticated bytes received. It was pinned at 0
-# for the whole outage, and with `ping 15` keepalives it always advances on a
-# healthy tunnel, even with no client traffic.
+# Read tun0's RX byte counter and require it to ADVANCE between runs. During
+# the outage tun0 showed TX climbing and RX pinned at exactly 0 -- traffic
+# going out, nothing coming back.
+#
+# Three probes that look reasonable and are all wrong here:
+#   - pinging a public address (e.g. the provider's DNS): publicly routable,
+#     so it answers via the home router with the tunnel down
+#   - `ping -I tun0`: fails even on a healthy tunnel with a DCO device
+#   - OpenVPN's status file ("Auth read bytes"): stays at 0 under DCO, because
+#     the data channel is handled in the kernel and never counted in
+#     userspace. An earlier version of this script used exactly that and so
+#     restarted a perfectly healthy tunnel every time it ran.
+#
+# Note a freshly (re)started tunnel has near-zero counters, which is why the
+# first run after a restart only requires a non-zero value, and why a stall
+# has to be seen REPEATEDLY before acting.
 #
 # BACKOFF
 # An earlier version of this script restarted OpenVPN every 60s on a false
@@ -33,7 +42,11 @@ TUN="tun0"
 LAN_IFACE="eth0"
 LAN_SUBNET="192.168.0.0/23"
 SERVICE="routerd-vpn"
-STATUS_FILE_DEFAULT="/run/routerd-vpn.status"
+# Deliberately high. This watchdog has already caused more downtime than it
+# prevented by reconnecting too eagerly, and the outage it exists for lasted
+# four days -- ten minutes of detection latency costs nothing, a false
+# reconnect costs a working tunnel and risks the provider's rate limiter.
+STALL_LIMIT=10          # consecutive stalled checks (~10 min) before acting
 STATE_FILE="/run/vpn-gateway-health.state"
 STAMP_FILE="/run/vpn-gateway-health.lastrestart"
 LOG="/var/log/vpn-gateway-health.log"
@@ -64,42 +77,68 @@ apply_firewall() {
         iptables -A FORWARD -i "$LAN_IFACE" -o "$LAN_IFACE" -d "$LAN_SUBNET" -j ACCEPT
 }
 
-# The tunnel is managed by routerd, which picks its own --status path.
-# Read it off the running process so this never drifts from reality.
-status_file() {
-    local pid cmd f
-    pid="$(pgrep -x openvpn | head -1)"
-    if [[ -n "$pid" && -r "/proc/$pid/cmdline" ]]; then
-        cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline")"
-        f="$(sed -n 's/.*--status \([^ ]*\).*/\1/p' <<<"$cmd")"
-        [[ -n "$f" && -r "$f" ]] && { echo "$f"; return; }
-    fi
-    echo "$STATUS_FILE_DEFAULT"
+# Bytes received on the tunnel device, straight from the kernel. Valid under
+# both DCO and the userspace data path.
+rx_bytes() {
+    awk -v ifc="$TUN:" '$1 == ifc {print $2; exit}' /proc/net/dev
 }
 
-auth_read_bytes() {
-    local f; f="$(status_file)"
-    [[ -r "$f" ]] || { echo ""; return; }
-    awk -F, '/^Auth read bytes/ {print $2; exit}' "$f" | tr -d '[:space:]'
+# Deliberately push a little traffic through the tunnel and see whether RX
+# moves. This is what separates "idle" from "dead": both look like a stalled
+# counter, and only one of them warrants a reconnect.
+#
+# The target does not matter much, only that the request leaves through tun0 --
+# which it does, because 0.0.0.0/1 routes there. Failures are ignored; the
+# byte counter is the signal, not the exit status.
+active_probe() {
+    local before after
+    before="$(rx_bytes)"
+    timeout 5 curl -s --max-time 4 -o /dev/null http://1.1.1.1/ 2>/dev/null || true
+    timeout 5 getent hosts one.one.one.one >/dev/null 2>&1 || true
+    sleep 1
+    after="$(rx_bytes)"
+    [[ -n "$after" && -n "$before" && "$after" -gt "$before" ]]
 }
 
-# Healthy = interface present, tunnel routes installed, and authenticated
-# bytes advancing since the previous run.
+# Healthy = interface present, tunnel routes installed, and RX advancing.
+#
+# A stall has to be seen STALL_LIMIT times in a row before it counts. A single
+# quiet minute is not evidence of a dead tunnel, and restarting on one is how
+# the previous version made things worse.
 tunnel_healthy() {
     ip link show "$TUN" &>/dev/null                     || return 1
     ip route show | grep -q "0.0.0.0/1 via .* dev $TUN" || return 1
 
-    local now prev
-    now="$(auth_read_bytes)"
+    local now prev stalls
+    now="$(rx_bytes)"
     [[ -n "$now" && "$now" =~ ^[0-9]+$ ]] || return 1
-    [[ "$now" -gt 0 ]]                                  || return 1
 
-    prev="$(cat "$STATE_FILE" 2>/dev/null || echo "")"
-    echo "$now" > "$STATE_FILE"
+    prev="$(cut -d' ' -f1 "$STATE_FILE" 2>/dev/null || echo "")"
+    stalls="$(cut -d' ' -f2 "$STATE_FILE" 2>/dev/null || echo 0)"
+    [[ "$stalls" =~ ^[0-9]+$ ]] || stalls=0
 
-    # First run after a restart has no baseline; a non-zero counter is enough.
-    [[ -n "$prev" && "$prev" =~ ^[0-9]+$ ]] || return 0
-    [[ "$now" -gt "$prev" ]]
+    # No baseline yet (first run, or just after a restart): accept and record.
+    if [[ -z "$prev" || ! "$prev" =~ ^[0-9]+$ ]]; then
+        echo "$now 0" > "$STATE_FILE"
+        return 0
+    fi
+
+    if [[ "$now" -gt "$prev" ]]; then
+        echo "$now 0" > "$STATE_FILE"
+        return 0
+    fi
+
+    # RX did not move -- but an idle tunnel is not a dead one, and with no
+    # client traffic it legitimately sits still. Generate a little traffic and
+    # look again before counting this against it.
+    if active_probe; then
+        echo "$(rx_bytes) 0" > "$STATE_FILE"
+        return 0
+    fi
+
+    stalls=$((stalls + 1))
+    echo "$now $stalls" > "$STATE_FILE"
+    (( stalls < STALL_LIMIT ))
 }
 
 recent_auth_failure() {
@@ -132,10 +171,18 @@ if ! restart_allowed; then
     exit 0
 fi
 
-log "ALERT: tunnel unhealthy (no authenticated bytes advancing), restarting $SERVICE"
+log "ALERT: tunnel unhealthy (tun0 RX stalled ${STALL_LIMIT}x or routes missing), restarting $SERVICE"
 date +%s > "$STAMP_FILE"
 rm -f "$STATE_FILE"
 systemctl restart "$SERVICE"
+
+# dnsmasq holds upstream sockets bound to the old tunnel and keeps using them
+# after it is recreated, so DNS silently dies for every client behind this
+# gateway even though the tunnel itself is fine. Restarting the tunnel without
+# restarting dnsmasq left the bittorrent host with no name resolution twice.
+if systemctl is-enabled --quiet dnsmasq 2>/dev/null || systemctl is-active --quiet dnsmasq 2>/dev/null; then
+    systemctl restart dnsmasq && log "restarted dnsmasq (upstreams follow the new tunnel)"
+fi
 
 for _ in $(seq 1 8); do
     sleep 5
