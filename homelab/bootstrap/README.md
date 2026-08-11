@@ -85,8 +85,8 @@ requests are served from cache.
 
 Homelab and ACK scripts configure the apt proxy individually.
 
-> The script still provisions the WOL interfaces on `vmbr1`/`vmbr3`. Those
-> networks are decommissioned and the running container no longer has them.
+> The WOL interfaces on `vmbr1`/`vmbr3` were removed from this script along
+> with the resolver entries pointing at the WOL gateways.
 
 ---
 
@@ -193,8 +193,10 @@ Multi-homed LXC container running the centralized observability stack.
 
 Must be deployed before ACK or LAN Promtail deployment.
 
-> The `wol` tenant and its mTLS ingestion path are retained in the script but
-> have no sources; WOL is decommissioned.
+> The `wol` Loki tenant is retained (harmless, and old logs still carry it),
+> but every WOL Prometheus scrape target has been removed -- they were failing
+> scrapes, not monitoring anything. The ECMP route, DNS and NTP settings that
+> pointed at the WOL gateways are gone too.
 
 ---
 
