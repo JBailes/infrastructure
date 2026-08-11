@@ -1,5 +1,16 @@
 # Proposal: Deployment Container
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+>
+> The WOL network described here has since been decommissioned.
+
+
 **Status:** Complete
 **Date:** 2026-03-29
 **Affects:** All networks, homelab/bootstrap/, router port forwarding, GitHub Actions
@@ -47,9 +58,9 @@ The infrastructure spans four isolated networks (LAN, WOL prod, WOL test, ACK). 
 
 | Interface | Bridge | IP | Network |
 |-----------|--------|-----|---------|
-| eth0 | vmbr0 | 192.168.1.101/23 | LAN (internet-facing, SSH ingress) |
+| eth0 | vmbr0 | CT 109 `deploy` | LAN (internet-facing, SSH ingress) |
 | eth1 | vmbr1 | 10.0.0.101/20 | WOL prod |
-| eth2 | vmbr2 | 10.1.0.101/24 | ACK |
+| eth2 | vmbr2 | CT 109 `deploy` | ACK |
 | eth3 | vmbr3 | 10.0.1.101/24 | WOL test |
 
 Gateway: 192.168.1.1 (via eth0, same as other LAN hosts).
@@ -118,7 +129,7 @@ The `github-actions` ipset is populated from GitHub's published IP ranges and re
 
 ### Router Port Forwarding
 
-The home router forwards external port 2222 to 192.168.1.101:2222. This is the only new port exposed to the internet.
+The home router forwards external port 2222 to CT 109 `deploy`:2222. This is the only new port exposed to the internet.
 
 ---
 
@@ -162,18 +173,18 @@ Each deployable repo contains a `deploy.sh` at its root that knows how to build 
 
 **acktng** (C MUD server):
 1. `cd src && make ack`
-2. `scp src/ack deploy@10.1.0.241:/opt/mud/src/src/ack`
-3. `ssh deploy@10.1.0.241 systemctl restart mud`
+2. `scp src/ack deploy@CT 241 `acktng`:/opt/mud/src/src/ack`
+3. `ssh deploy@CT 241 `acktng` systemctl restart mud`
 
 **web-tng** (.NET web app):
 1. `dotnet publish AckWeb.Api/AckWeb.Api.csproj -c Release -o /tmp/publish`
-2. `rsync -a /tmp/publish/ deploy@10.1.0.247:/opt/ack-web/publish/api/`
-3. `ssh deploy@10.1.0.247 systemctl restart ackweb`
+2. `rsync -a /tmp/publish/ deploy@CT 247 `ack-web`:/opt/ack-web/publish/api/`
+3. `ssh deploy@CT 247 `ack-web` systemctl restart ackweb`
 
 **tng-ai** (Python service):
-1. `rsync -a --exclude='.venv' --exclude='__pycache__' ./ deploy@10.1.0.248:/opt/tng-ai/`
-2. `ssh deploy@10.1.0.248 '/opt/tng-ai/.venv/bin/pip install -r /opt/tng-ai/requirements.txt -q'`
-3. `ssh deploy@10.1.0.248 systemctl restart tng-ai`
+1. `rsync -a --exclude='.venv' --exclude='__pycache__' ./ deploy@CT 248 `tng-ai`:/opt/tng-ai/`
+2. `ssh deploy@CT 248 `tng-ai` '/opt/tng-ai/.venv/bin/pip install -r /opt/tng-ai/requirements.txt -q'`
+3. `ssh deploy@CT 248 `tng-ai` systemctl restart tng-ai`
 
 ### SSH to Target Containers
 
@@ -212,7 +223,7 @@ New: `homelab/bootstrap/09-setup-deploy.sh`
 | `homelab/bootstrap/` | `09-setup-deploy.sh` | New: deployment container bootstrap |
 | `homelab/bootstrap/` | `03-setup-obs.sh` | Add deploy to Prometheus blackbox targets |
 | `homelab/bootstrap/` | `08-setup-dashboards.sh` | Add deploy to Homelab Infrastructure panel |
-| `homelab/ack/bootstrap/` | `00-setup-ack-gateway.sh` | Add deploy DNS entry (10.1.0.101) |
+| `homelab/ack/bootstrap/` | `00-setup-ack-gateway.sh` | Add deploy DNS entry (CT 109 `deploy`) |
 | `wol/bootstrap/` | `02-setup-wol-gateway.sh` | Add deploy DNS entry (10.0.0.101, 10.0.1.101) |
 | `homelab/` | `README.md` | Add deploy to hosts table |
 | `architecture.md` | | Add deploy to shared services, guest count |
@@ -221,10 +232,10 @@ New: `homelab/bootstrap/09-setup-deploy.sh`
 
 ## Execution Order
 
-1. Create CT 119 on Proxmox (quad-homed)
+1. Create `media-stack` (not deployed) on Proxmox (quad-homed)
 2. Run bootstrap script
 3. Add GitHub Actions deploy key to `~deploy/.ssh/authorized_keys`
-4. Configure router port forward: external :2222 -> 192.168.1.101:2222
+4. Configure router port forward: external :2222 -> CT 109 `deploy`:2222
 5. Add `deploy` user + SSH key to each target container
 6. Add deploy scripts to each repo
 7. Create GitHub Actions deployment workflows

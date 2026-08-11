@@ -1,5 +1,19 @@
 # WOL Infrastructure -- Host Inventory
 
+> ## Decommissioned
+>
+> The WOL (World of Legends) infrastructure no longer exists. All 19 guests
+> (18 LXC + 1 VM) have been removed from the Proxmox host. The `vmbr1`
+> (10.0.0.0/24) and `vmbr3` (10.0.1.0/24) bridges are still configured but have
+> `bridge-ports none` and carry no guests.
+>
+> This document is retained as a **design record only**. It does not describe
+> running infrastructure, and the hostnames and addresses in it are historical
+> -- they are kept because removing them would gut the record. Do not use this
+> document to reason about the current environment; see
+> [architecture.md](../architecture.md) for what actually runs.
+
+
 Prod network: `10.0.0.0/24` (bridge `vmbr1`, prod + shared hosts)
 Test network: `10.0.1.0/24` (bridge `vmbr3`, test hosts)
 NAT gateways: `10.0.0.200` / `10.0.1.200` (`wol-gateway-a`) and `10.0.0.201` / `10.0.1.201` (`wol-gateway-b`), active-active ECMP for outbound internet

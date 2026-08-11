@@ -1,5 +1,14 @@
 # Convert VPN Gateway from LXC to VM
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+
+
 ## Problem
 
 The VPN gateway (CT 104) is an LXC container that forwards LAN traffic through a VPN tunnel. IP forwarding works at the sysctl level, but the shared kernel network namespace prevents the FORWARD chain from receiving transit traffic. Packets from other LAN hosts arrive at the gateway's MAC with non-local destination IPs, but the kernel classifies them as INPUT rather than FORWARD. This is a known limitation of LXC networking.
@@ -42,7 +51,7 @@ In-VM (`configure`):
 |-------|-------|
 | VMID | 104 |
 | Hostname | vpn-gateway |
-| IP | 192.168.1.104/23 |
+| Host | VM 111 `smoothrouter` |
 | Gateway | 192.168.1.1 |
 | Disk | 4 GB |
 | RAM | 512 MB |

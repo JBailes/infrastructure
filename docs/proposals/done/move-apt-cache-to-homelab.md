@@ -1,8 +1,19 @@
 # Move apt-cache from WOL to Homelab Infrastructure
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+>
+> The WOL network described here has since been decommissioned.
+
+
 ## Problem
 
-The apt-cache host (apt-cacher-ng on 10.0.0.32 / 192.168.1.115) is defined and bootstrapped as part of the WOL infrastructure (`wol/proxmox/inventory.conf`, `wol/bootstrap/01-setup-apt-cache.sh`), but it is not a WOL service. It is a general-purpose package cache that serves WOL (10.0.0.0/20), homelab (192.168.0.0/23), and ACK (10.1.0.0/24) networks. The homelab already tri-homes it for ACK in `homelab/ack/bootstrap/pve-setup-ack.sh`.
+The apt-cache host (apt-cacher-ng on 10.0.0.32 / CT 140 `tierA-5080` `apt-cache`) is defined and bootstrapped as part of the WOL infrastructure (`wol/proxmox/inventory.conf`, `wol/bootstrap/01-setup-apt-cache.sh`), but it is not a WOL service. It is a general-purpose package cache that serves WOL (10.0.0.0/20), homelab (192.168.0.0/23), and ACK (10.1.0.0/24) networks. The homelab already tri-homes it for ACK in `homelab/ack/bootstrap/pve-setup-ack.sh`.
 
 Placing it in WOL means tearing down WOL also tears down the cache (unless `--include-cache` is avoided), and the WOL inventory carries a host that has nothing to do with the game.
 
@@ -68,7 +79,7 @@ Remove the `--include-cache` flag and any apt-cache teardown logic. apt-cache te
 
 ## What does NOT change
 
-- apt-cache IP (10.0.0.32), port (3142), or external IP (192.168.1.115)
+- apt-cache IP (10.0.0.32), port (3142), or external IP (CT 140 `tierA-5080` `apt-cache`)
 - WOL proxy-push behavior (still probes and configures if reachable)
 - WOL bootstrap scripts that call `configure_apt_proxy()` or `install_proxy_health_check()`
 - ACK tri-homing in `homelab/ack/bootstrap/pve-setup-ack.sh`

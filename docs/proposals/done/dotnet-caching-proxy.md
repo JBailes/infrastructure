@@ -1,4 +1,13 @@
-# Proposal: .NET SDK Caching Proxy on nginx-proxy (CT 118)
+# Proposal: .NET SDK Caching Proxy on nginx-proxy (CT 105 `nginx-proxy`)
+
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+
 
 ## Problem
 
@@ -6,9 +15,9 @@
 
 ## Approach
 
-Add an nginx caching reverse proxy on CT 118 (`nginx-proxy`) that transparently caches .NET SDK downloads. This host already has access to all three networks (LAN, WOL, ACK), so every VM can reach it.
+Add an nginx caching reverse proxy on CT 105 `nginx-proxy` (`nginx-proxy`) that transparently caches .NET SDK downloads. This host already has access to all three networks (LAN, WOL, ACK), so every VM can reach it.
 
-### nginx-proxy changes (CT 118)
+### nginx-proxy changes (CT 105 `nginx-proxy`)
 
 Add a caching proxy configuration that:
 
@@ -69,7 +78,7 @@ Also includes the already-implemented fix to remove stale Microsoft apt sources.
 
 ### Disk space consideration
 
-CT 118 currently has 4 GB disk. The .NET 9 SDK tarball is ~200 MB, so the cache is small. The 2 GB `max_size` limit on the cache zone ensures it self-evicts old entries. No disk resize needed unless we start caching more than .NET.
+CT 105 `nginx-proxy` currently has 4 GB disk. The .NET 9 SDK tarball is ~200 MB, so the cache is small. The 2 GB `max_size` limit on the cache zone ensures it self-evicts old entries. No disk resize needed unless we start caching more than .NET.
 
 ## Affected files/repos
 
@@ -81,9 +90,9 @@ CT 118 currently has 4 GB disk. The .NET 9 SDK tarball is ~200 MB, so the cache 
 ## Trade-offs
 
 - **Pro:** Transparent to VMs, first download caches automatically, no manual tarball management
-- **Pro:** Reuses existing infrastructure (CT 118 already serves all networks)
+- **Pro:** Reuses existing infrastructure (CT 105 `nginx-proxy` already serves all networks)
 - **Pro:** Immutable SDK tarballs make aggressive caching safe
-- **Con:** Adds a dependency on CT 118 being reachable during setup (but it already is for web proxying)
+- **Con:** Adds a dependency on CT 105 `nginx-proxy` being reachable during setup (but it already is for web proxying)
 - **Con:** First VM still downloads from Microsoft; subsequent VMs hit cache
 - **Fallback:** If the cache is unreachable, `dotnet-install.sh` could fall back to the direct URL (setup.sh can attempt cache first, direct second)
 

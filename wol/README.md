@@ -1,5 +1,19 @@
 # WOL Infrastructure
 
+> ## Decommissioned
+>
+> The WOL (World of Legends) infrastructure no longer exists. All 19 guests
+> (18 LXC + 1 VM) have been removed from the Proxmox host. The `vmbr1`
+> (10.0.0.0/24) and `vmbr3` (10.0.1.0/24) bridges are still configured but have
+> `bridge-ports none` and carry no guests.
+>
+> This document is retained as a **design record only**. It does not describe
+> running infrastructure, and the hostnames and addresses in it are historical
+> -- they are kept because removing them would gut the record. Do not use this
+> document to reason about the current environment; see
+> [architecture.md](../architecture.md) for what actually runs.
+
+
 Infrastructure documentation, bootstrap scripts, and deployment configuration for the WOL (World of Legends) game ecosystem.
 
 ## Directory Structure
@@ -165,11 +179,11 @@ See [diagrams.md](diagrams.md) Section 8 for the full gantt chart.
 
 | Proposal | Scope |
 |----------|-------|
-| [Private CA and Secret Management](proposals/active/Infrastructure/private-ca-and-secret-management.md) | Offline root CA, cfssl CA, cert profiles, TLS policy, incident playbooks |
-| [SPIFFE/SPIRE Workload Identity](proposals/active/Infrastructure/spiffe-spire-workload-identity.md) | X.509-SVIDs, JWT-SVIDs, node/workload attestation, trust domain |
-| [Proxmox Deployment Automation](proposals/active/Infrastructure/proxmox-deployment-automation.md) | Host provisioning, bootstrap orchestration, boot ordering |
-| [WOL Accounts DB and API](proposals/active/Infrastructure/wol-accounts-db-and-api.md) | Account auth, sessions, login, lockout, BCrypt |
-| [WOL World DB and API](proposals/active/Infrastructure/wol-world-db-and-api.md) | Areas, rooms, objects, NPCs, resets, bulk snapshot |
-| [Observability Stack](proposals/active/Infrastructure/observability-stack.md) | Loki, Prometheus, Alertmanager, Grafana, Promtail |
-| [WOL Gateway](proposals/active/Infrastructure/wol-gateway.md) | NAT, DNS, NTP, dual-gateway ECMP |
-| [WOL AI Service](proposals/active/Infrastructure/wol-ai-service.md) | AI-powered NPC dialogue |
+| [Private CA and Secret Management](../docs/proposals/done/private-ca-and-secret-management.md) | Offline root CA, cfssl CA, cert profiles, TLS policy, incident playbooks |
+| [SPIFFE/SPIRE Workload Identity](../docs/proposals/done/spiffe-spire-workload-identity.md) | X.509-SVIDs, JWT-SVIDs, node/workload attestation, trust domain |
+| [Proxmox Deployment Automation](../docs/proposals/done/proxmox-deployment-automation.md) | Host provisioning, bootstrap orchestration, boot ordering |
+| [WOL Accounts DB and API](../docs/proposals/done/wol-accounts-db-and-api.md) | Account auth, sessions, login, lockout, BCrypt |
+| [WOL World DB and API](../docs/proposals/done/wol-world-db-and-api.md) | Areas, rooms, objects, NPCs, resets, bulk snapshot |
+| [Observability Stack](../docs/proposals/done/observability-stack.md) | Loki, Prometheus, Alertmanager, Grafana, Promtail |
+| [WOL Gateway](../docs/proposals/done/wol-gateway.md) | NAT, DNS, NTP, dual-gateway ECMP |
+| [WOL AI Service](../docs/proposals/done/wol-ai-service.md) | AI-powered NPC dialogue |

@@ -1,5 +1,16 @@
 # Proposal: Tri-home Observability Host in Homelab
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+>
+> The WOL network described here has since been decommissioned.
+
+
 **Status:** Active (implementing)
 **Date:** 2026-03-27
 **Affects:** obs host, `homelab/bootstrap/`, `wol/bootstrap/`, `wol/proxmox/inventory.conf`, documentation
@@ -20,9 +31,9 @@ Renamed from `wol-obs` to `obs`. Moved from WOL inventory to `homelab/bootstrap/
 
 | Interface | Bridge | IP | Network |
 |-----------|--------|----|---------|
-| eth0 | vmbr0 | 192.168.1.100/23 | Home LAN |
+| eth0 | vmbr0 | CT 104 `obs` | Home LAN |
 | eth1 | vmbr1 | 10.0.0.100/20 | WOL private |
-| eth2 | vmbr2 | 10.1.0.100/24 | ACK private |
+| eth2 | vmbr2 | CT 104 `obs` | ACK private |
 
 CTID: **100** (static, following the homelab convention of `X.X.X.{CTID}`).
 
@@ -41,8 +52,8 @@ CTID: **100** (static, following the homelab convention of `X.X.X.{CTID}`).
 ### What did NOT change
 
 - WOL Promtail still pushes to 10.0.0.100 over mTLS (tenant: wol)
-- Proxmox observability still pushes to 192.168.1.100 (tenant: proxmox)
-- Grafana serves on 192.168.1.100
+- Proxmox observability still pushes to CT 104 `obs` (tenant: proxmox)
+- Grafana serves on CT 104 `obs`
 - Alert rules, retention policies, and cardinality guardrails unchanged
 
 ---

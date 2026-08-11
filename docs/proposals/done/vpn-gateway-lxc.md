@@ -1,5 +1,16 @@
 # VPN Gateway LXC
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+>
+> The WOL network described here has since been decommissioned.
+
+
 ## Problem
 
 To route specific devices' traffic through a VPN, each device must run its own VPN client. This is impractical for devices that don't support VPN clients natively (smart TVs, game consoles, IoT) or when you want centralized control.
@@ -33,7 +44,7 @@ Device (gateway = 192.168.1.1)
 |-------|-------|
 | CTID | 104 |
 | Hostname | `vpn-gateway` |
-| IP | `192.168.1.104/23` |
+| Host | VM 111 `smoothrouter` |
 | Gateway | `192.168.1.1` |
 | Network | `192.168.0.0/23` only (no internal 10.0.0.0/20 interface) |
 | Type | LXC (privileged, for /dev/net/tun access) |
@@ -106,7 +117,7 @@ lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
 
 ### Switching a device to VPN
 
-On any LAN device, change the default gateway from `192.168.1.1` to `192.168.1.104`. That's it. Change it back to `192.168.1.1` to stop using VPN.
+On any LAN device, change the default gateway from `192.168.1.1` to VM 111 `smoothrouter`. That's it. Change it back to `192.168.1.1` to stop using VPN.
 
 ## Trade-offs
 
