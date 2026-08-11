@@ -109,6 +109,31 @@ FSTAB
         info "Download directories ready: complete/, incomplete/"
     }
 
+    # -- Disable IPv6
+    #
+    # The VPN tunnel carries IPv4 only. DNS still returns AAAA records, so
+    # every tracker and peer that resolves to IPv6 first was attempted over a
+    # path that does not exist and timed out. Measured effect: trackers such as
+    # open.stealth.si and tracker.torrent.eu.org reported "timed out" and the
+    # known swarm collapsed from ~7300 seeds to 43. Disabling IPv6 here made
+    # those trackers answer again.
+    #
+    # This is not a leak fix -- the container has no global IPv6 address or
+    # default route, so nothing was escaping the tunnel. It only stops wasted
+    # connection attempts.
+    disable_ipv6() {
+        info "Disabling IPv6 (tunnel is IPv4-only; AAAA lookups just time out)"
+        cat > /etc/sysctl.d/99-disable-ipv6.conf <<'SYSCTL'
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+SYSCTL
+        sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
+
+        # Prefer IPv4 in getaddrinfo even where AAAA is still returned.
+        grep -q '^precedence ::ffff:0:0/96' /etc/gai.conf 2>/dev/null \
+            || echo 'precedence ::ffff:0:0/96  100' >> /etc/gai.conf
+    }
+
     # -- Kill switch (iptables)
     setup_firewall() {
         info "Configuring local iptables kill switch"
@@ -307,6 +332,7 @@ WDTIMER
     # -- Run in-container setup
     configure_apt_proxy
     install_packages
+    disable_ipv6
     setup_nfs_mount
     setup_firewall
     setup_qbittorrent
