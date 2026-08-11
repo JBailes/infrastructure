@@ -17,8 +17,8 @@
 # via certbot and routes by Host header to the appropriate backend:
 #   ackmud.com      -> ack-web (10.1.0.247:5000) + stream for WSS ports
 #   aha.ackmud.com  -> redirect to ackmud.com
-#   bailes.us       -> personal-web (192.168.1.117:3000)
-#   rakuensoftware.com -> rakuen-web (192.168.1.121:3000)
+#   bailes.us       -> personal-web (personal-web:3000)
+#   rakuensoftware.com -> rakuen-web (rakuen-web:3000)
 #   rakuensoft.com  -> redirect to rakuensoftware.com
 
 set -euo pipefail
@@ -93,8 +93,8 @@ ACK:  $ACK_IP (eth2, vmbr2) -- reach ack-web (10.1.0.247:5000)
 Routing:
   ackmud.com      -> http://10.1.0.247:5000 (ack-web)
   aha.ackmud.com  -> https://ackmud.com
-  bailes.us       -> http://192.168.1.117:3000 (personal-web)
-  rakuensoftware.com -> http://192.168.1.121:3000 (rakuen-web)
+  bailes.us       -> http://personal-web:3000 (personal-web)
+  rakuensoftware.com -> http://rakuen-web:3000 (rakuen-web)
   rakuensoft.com  -> https://rakuensoftware.com (301)
   WSS :18890      -> 10.1.0.247:18890
   WSS :8891       -> 10.1.0.247:8891
@@ -235,7 +235,7 @@ server {
     server_name bailes.us www.bailes.us;
 
     location / {
-        proxy_pass http://192.168.1.117:3000;
+        proxy_pass http://personal-web:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -250,7 +250,7 @@ server {
     server_name rakuensoftware.com www.rakuensoftware.com;
 
     location / {
-        proxy_pass http://192.168.1.121:3000;
+        proxy_pass http://rakuen-web:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 # 02-setup-bittorrent.sh -- Create and configure the BitTorrent LXC
 #
-# Runs on: the Proxmox host (creates CT 116, then configures it)
-# Run order: Step 02 (after vpn-gateway)
+# Runs on: the Proxmox host (creates the `bittorrent` CT, then configures it)
+# Run order: Step 02 (after the VPN gateway)
 #
 # Usage:
 #   ./02-setup-bittorrent.sh               # Create CT and configure
 #   ./02-setup-bittorrent.sh --deploy-only  # Re-run configuration on existing CT
 #   ./02-setup-bittorrent.sh --configure    # (internal) Run inside the container
 #
-# Creates a privileged Debian 13 LXC (CT 116):
-#   eth0 = 192.168.1.116/23 on vmbr0 (LAN, gateway = VPN gateway 192.168.1.104)
+# Creates a privileged Debian 13 LXC named `bittorrent` on vmbr0, routing
+# through the `vpn-gateway` host. The CTID is resolved from the hostname, not
+# pinned: this script used to hardcode CT 116, which after a renumber would
+# have created a duplicate instead of updating the real container.
 #
 # Prerequisites:
-#   - VPN gateway (192.168.1.104) must be running
-#   - NAS NFS export 192.168.1.254:/mnt/data/storage/bittorrent must be accessible
+#   - the `vpn-gateway` host must be running
+#   - NAS NFS export nas:/mnt/data/storage/bittorrent must be accessible
 #
 # This container runs qBittorrent-nox with three layers of VPN enforcement:
-#   1. Default gateway is the VPN gateway (192.168.1.104), which has its own
+#   1. Default gateway is the VPN gateway, which has its own
 #      kill switch that drops all forwarded traffic if the tunnel is down
 #   2. Local iptables: OUTPUT policy DROP, only allows traffic to the VPN
 #      gateway and NAS
@@ -29,20 +31,28 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ===================================================================
-# In-container configuration (runs inside CT 116)
+# In-container configuration (runs inside the bittorrent CT)
 # ===================================================================
 
 configure() {
-    VPN_GATEWAY="192.168.1.104"
-    NAS_HOST="192.168.1.254"
-    NAS_EXPORT="192.168.1.254:/mnt/data/storage/bittorrent"
+    # Resolved on the Proxmox host and passed in, rather than written down here.
+    # The watchdog and the routing rules compare against `ip route` output and
+    # run when the tunnel may be down, so they need a literal address and must
+    # not depend on DNS -- but the repo should not be the thing holding it.
+    VPN_GATEWAY="${VPN_GATEWAY_ADDR:?VPN_GATEWAY_ADDR not set (resolved by host_main)}"
+
+    # Names, not addresses. bittorrent resolves the local zone through the VPN
+    # gateway's dnsmasq, which forwards bailes.us to the LAN resolver, so this
+    # works without weakening its DNS-leak guard.
+    NAS_HOST="nas"
+    NAS_EXPORT="nas:/mnt/data/storage/bittorrent"
     MOUNT_POINT="/mnt/torrents"
     LAN_IFACE="eth0"
     LAN_SUBNET="192.168.0.0/23"
     QBIT_PORT="8080"
     QBIT_EXT_PORT="80"
     QBIT_USER="qbittorrent"
-    APT_CACHE="192.168.1.115"
+    APT_CACHE="apt-cache"
     APT_CACHE_PORT="3142"
 
     err()  { echo "ERROR: $*" >&2; exit 1; }
@@ -129,7 +139,7 @@ FSTAB
 
         # Allow everything else. Torrent peers have public IPs, so we
         # cannot restrict to LAN only. Routing sends all traffic through
-        # the VPN gateway (192.168.1.104), whose kill switch ensures
+        # the VPN gateway, whose kill switch ensures
         # nothing exits unencrypted.
         iptables -A OUTPUT -j ACCEPT
 
@@ -212,7 +222,7 @@ SERVICE
 #!/usr/bin/env bash
 # VPN watchdog: stop qBittorrent if traffic would not go through VPN gateway
 
-VPN_GATEWAY="192.168.1.104"
+VPN_GATEWAY="the VPN gateway"
 SERVICE="qbittorrent-nox"
 LOGFILE="/var/log/vpn-watchdog.log"
 
@@ -327,15 +337,29 @@ host_main() {
     source "$SCRIPT_DIR/lib/common.sh"
     [[ $EUID -eq 0 ]] || err "Run as root"
 
-    local ctid=116
     local hostname="bittorrent"
-    local ip="192.168.1.${ctid}"
     local deploy_only=0
     [[ "${1:-}" == "--deploy-only" ]] && deploy_only=1
 
-    if [[ $deploy_only -eq 0 ]]; then
-        if create_lxc "$ctid" "$hostname" "$ip" 1024 2 8 "$VPN_GATEWAY_IP" "yes" \
-                --nameserver "$VPN_GATEWAY_IP"; then
+    # The gateway is named; its address is looked up now so the container gets
+    # a literal it can compare `ip route` against without needing DNS.
+    local gw_addr
+    gw_addr="$(host_ip "$VPN_GATEWAY_HOST")" \
+        || err "Could not resolve $VPN_GATEWAY_HOST -- is the VPN gateway running?"
+
+    # Prefer the existing container over a hardcoded CTID: this script used to
+    # pin CT 116, which after a renumber would have created a duplicate rather
+    # than updating the real one.
+    local ctid
+    if ctid="$(resolve_ctid "$hostname" 2>/dev/null)"; then
+        info "Found existing $hostname at CT $ctid"
+    elif [[ $deploy_only -eq 1 ]]; then
+        err "No container named '$hostname' exists; run without --deploy-only to create it"
+    else
+        ctid="$(next_free_ctid "$CTID_RANGE_START")"
+        local ip="192.168.1.${ctid}"
+        if create_lxc "$ctid" "$hostname" "$ip" 1024 2 8 "$gw_addr" "yes" \
+                --nameserver "$gw_addr"; then
             pct start "$ctid"
             info "CREATED: CT $ctid ($hostname) at $ip"
         fi
@@ -346,8 +370,8 @@ host_main() {
         pct start "$ctid" 2>/dev/null || err "CT $ctid is not running and could not be started"
     fi
 
-    info "Deploying $hostname configuration (CT $ctid)"
-    deploy_script "$ctid" "$SCRIPT_DIR/02-setup-bittorrent.sh"
+    info "Deploying $hostname configuration (CT $ctid, gateway $VPN_GATEWAY_HOST at $gw_addr)"
+    deploy_script "$ctid" "$SCRIPT_DIR/02-setup-bittorrent.sh" "VPN_GATEWAY_ADDR=$gw_addr"
 }
 
 # ===================================================================

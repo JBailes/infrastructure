@@ -116,7 +116,7 @@ General-purpose services on the home LAN.
 - **CT 109 `deploy`** -- dual-homed deployment container. GitHub Actions SSHs in to build and deploy artifacts. Key-only auth, GitHub IP allowlist.
 - **CT 106 `personal-web`** -- static file server (node serve on :3000) for bailes.us.
 - **CT 107 `rakuen-web`** -- static file server (node serve on :3000) for rakuensoftware.com. Builds the Vite/React site in-container.
-- **CT 101 `dns`** -- Technitium DNS server (:53), admin UI on :5380.
+- **CT 101 `dns`** -- Technitium DNS server (:53), admin UI on :5380. Authoritative for the `bailes.us` local zone and the reason hosts can be referred to by name anywhere in this repo. Its records are **derived from live Proxmox state** by `homelab/bootstrap/15-setup-dns.sh`, not maintained by hand, so renumbering a guest is corrected by re-running that script. Anything outside the local zone is forwarded to the router. LAN guests use it as their primary nameserver with the router as secondary; `bittorrent` and `ack-gateway` are deliberately excluded (see the bootstrap README).
 - **CT 102 `unifi`** -- UniFi Network controller (:8443 UI, :8080 inform, :6789, :8843) backed by MongoDB.
 - **CT 100 `code`** -- development and tooling container.
 - **CT 280 `aimee-main`** -- aimee agent host, Docker-based services on :8443 and :8743.

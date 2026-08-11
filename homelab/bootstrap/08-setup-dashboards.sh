@@ -135,10 +135,10 @@ configure_blackbox_scrape() {
       - targets: ['http://192.168.1.109:8096/emby/system/info/public']
         labels:
           name: emby
-      - targets: ['http://192.168.1.120:47989/pin/']
+      - targets: ['http://wolf:47989/pin/']
         labels:
           name: wolf
-      - targets: ['http://192.168.1.120:8080']
+      - targets: ['http://wolf:8080']
         labels:
           name: wolf-den
       - targets: ['http://192.168.1.116:8080']
@@ -839,8 +839,8 @@ Blackbox probes added for:
   - plex (192.168.1.105:32400)
   - adguard (192.168.1.108:80)
   - emby (192.168.1.109:8096)
-  - wolf (192.168.1.120:47989)
-  - wolf-den (192.168.1.120:8080)
+  - wolf (wolf:47989)
+  - wolf-den (wolf:8080)
   - bittorrent (192.168.1.116:8080)
   - prowlarr (192.168.1.119:9696)
   - sonarr (192.168.1.119:8989)

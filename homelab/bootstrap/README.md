@@ -4,32 +4,33 @@ Each script is self-contained: run it on the Proxmox host and it creates the
 LXC container (or VM), then pushes and executes itself inside to configure it.
 Scripts are idempotent: they skip container creation if it already exists.
 
-Hosts are referred to by **CTID and hostname**. Where a script must assign an
-address at provisioning time it still carries a literal one; that is a property
-of the script, not something documentation should restate.
+## Hosts are named, not numbered
 
-## CTID drift
+Nothing here writes down another host's address. Cross-host references use
+**hostnames**, resolved by the local DNS server (CT `dns`, see step 15). The
+only addresses left in this directory are the router, the NAS, and subnet
+CIDRs -- none of which are Proxmox guests whose address could be looked up.
 
-> **These scripts do not match the running host.** The CTIDs below are what each
-> script provisions. Several containers were renumbered after they were first
-> created, so re-running a script against the current host will not target the
-> existing container -- it will try to create a new one at the old CTID.
->
-> | Script provisions | Actually running as |
-> |-------------------|---------------------|
-> | CT 100 `obs` | CT 104 `obs` |
-> | CT 115 `apt-cache` | CT 103 `apt-cache` |
-> | CT 116 `bittorrent` | CT 108 `bittorrent` |
-> | CT 117 `personal-web` | CT 106 `personal-web` |
-> | CT 118 `nginx-proxy` | CT 105 `nginx-proxy` |
-> | CT 121 `rakuen-web` | CT 107 `rakuen-web` |
-> | CT 120 `wolf` | CT 113 `wolf` |
-> | CT 122 `qwen103` | CT 140 `tierA-5080` |
-> | VM 104 `vpn-gateway` | VM 111 `smoothrouter` |
-> | CT 119 `media-stack` | not deployed |
->
-> Use `resolve_ctid <hostname>` from `lib/common.sh` to find a host's real CTID
-> rather than trusting the constants in these scripts.
+This is not cosmetic. Every host was renumbered at some point, and every
+written-down address went stale silently, because nothing checks a comment.
+The bittorrent watchdog kept comparing the live default route against a
+gateway address that had moved, and stopped qBittorrent on every run for
+six days before anyone noticed.
+
+Three rules follow from that:
+
+- **Cross-host references use names.** `obs:3100`, `apt-cache:3142`,
+  `nas:/mnt/data/...`. These resolve through CT `dns`.
+- **Where a literal address is genuinely required**, resolve it at run time
+  with `host_ip <hostname>` from `lib/common.sh` and pass it in. iptables
+  source matches, and the bittorrent watchdog's comparison against
+  `ip route` output, both need an address and must not depend on DNS.
+- **CTIDs are resolved, not pinned.** Scripts call `resolve_ctid <hostname>`
+  and fall back to `next_free_ctid` when creating. Pinning a CTID is what
+  would make a re-run create a duplicate container after a renumber.
+
+`lib/common.sh` provides `host_ip`, `resolve_ctid`, `guest_ip`, and
+`guest_list`; all of them read live Proxmox state.
 
 ## Usage
 
@@ -46,6 +47,10 @@ Run each script directly on the Proxmox host, in order:
 ./06-setup-nginx-proxy.sh         # nginx-proxy, reverse proxy (multi-homed)
 ./07-setup-personal-web.sh        # personal-web, personal website (bailes.us)
 ./13-setup-rakuen-web.sh          # rakuen-web, Rakuen Software site (rakuensoftware.com)
+
+# Phase 2b: name resolution and VPN self-healing
+./15-setup-dns.sh                 # sync the local DNS zone from live Proxmox state
+./14-setup-vpn-gateway-health.sh  # self-healing health check on the VPN gateway
 
 # Phase 3: dashboards and host observability
 ./08-setup-dashboards.sh          # Grafana dashboards + blackbox_exporter on obs
@@ -120,7 +125,7 @@ gateway. To stop using the VPN, set both back to the home router.
 ## 02 - BitTorrent (`bittorrent`)
 
 LXC container running qBittorrent-nox with three layers of VPN enforcement.
-Downloads are stored on the NAS (192.168.1.254) over NFS.
+Downloads are stored on `nas` over NFS.
 
 ### Prerequisites
 
@@ -134,14 +139,20 @@ Downloads are stored on the NAS (192.168.1.254) over NFS.
 2. **Local iptables kill switch**: OUTPUT policy is DROP, blocking the home
    router directly so the container cannot send internet-bound traffic anywhere
    except through the VPN gateway, even if the default route is changed.
-3. **Watchdog**: checks the default route and gateway reachability every 60
-   seconds. Stops qBittorrent immediately if anything is wrong. Restarts it
-   when conditions are restored.
+3. **Watchdog**: checks the default route, gateway reachability, and real
+   egress every 60 seconds. Stops qBittorrent if anything is wrong, and
+   restarts it when conditions are restored.
 
-> This script still hard-codes the old VPN gateway address in the watchdog it
-> installs. The watchdog on the running container has since been changed to read
-> its expected gateway from `/etc/vpn-watchdog.conf` and to fail loudly if that
-> value is missing. Re-running this script would overwrite that fix.
+The watchdog reads its expected gateway from `/etc/vpn-watchdog.conf`, written
+at deploy time from `host_ip vpn-gateway`, and fails loudly if that value is
+missing rather than guessing. It previously carried the address inline, which
+is why it silently stopped qBittorrent on every run once the gateway moved.
+
+The route and ping checks both still pass while the gateway's *tunnel* is
+dead -- the route is correct and the gateway answers. That is false assurance,
+so the watchdog also probes real egress and stops qBittorrent after three
+consecutive failures. The gateway's kill switch means a dead tunnel blocks
+rather than leaks, so a sustained egress failure is the tunnel being down.
 
 ### Storage
 
@@ -481,4 +492,81 @@ Config databases are backed up daily at 03:00 to
 ```bash
 ./12-setup-media-stack.sh                # Create CT and configure
 ./12-setup-media-stack.sh --deploy-only  # Re-run configuration on existing CT
+```
+
+---
+
+## 14 - VPN Gateway Health (`vpn-gateway`)
+
+Installs a self-healing health check onto the VPN gateway. Separate from
+step 01 because the live gateway is a SmoothRouter appliance that runs
+OpenVPN under `routerd-vpn.service` -- step 01 builds a plain Debian
+OpenVPN VM and would clobber it, so this only adds files under
+`/usr/local/bin` and `/etc/systemd/system`.
+
+### What it fixes
+
+OpenVPN can come up with a broken `ovpn-dco` data channel. Because the
+config sets `persist-tun`, `tun0` and its routes stay in place while no
+data flows, so the tunnel looks healthy and nothing recovers it. One such
+outage ran unnoticed from 2026-08-07 to 2026-08-11.
+
+Liveness is therefore judged by **authenticated bytes advancing** in
+OpenVPN's status file -- the one counter that stayed pinned at zero for
+the whole outage. Two probes that look reasonable and are not:
+
+- pinging the provider's DNS: publicly routable, so it answers via the
+  home router with the tunnel down
+- `ping -I tun0`: fails even on a healthy DCO device
+
+It also re-applies NAT and the FORWARD kill switch on every run. There is
+no `iptables-persistent` on the gateway, so a boot timer is what makes
+those rules durable.
+
+### Backoff
+
+Restarts are rate-limited to one per 10 minutes, and it will not retry
+after `AUTH_FAILED`: the provider rate-limits reconnects, and a restart
+loop is worse than a down tunnel because the kill switch already means a
+down tunnel leaks nothing.
+
+```bash
+./14-setup-vpn-gateway-health.sh            # install and enable
+./14-setup-vpn-gateway-health.sh --status   # report state, change nothing
+```
+
+Log: `/var/log/vpn-gateway-health.log` on the gateway.
+
+---
+
+## 15 - DNS (`dns`)
+
+Syncs the local DNS zone on CT `dns` (Technitium) and points LAN guests
+at it. This is what makes hostnames work, and therefore what lets every
+other script stop writing addresses down.
+
+**Records are derived, not listed.** The script reads the live guest list
+from Proxmox and syncs the zone to match, so renumbering a container is
+corrected by the next run and nothing else needs editing. Guests with no
+static address are skipped rather than guessed at -- DHCP leases and OCI
+containers on host networking would only drift.
+
+Anything outside the local zone is forwarded to the home router.
+
+Three hosts are deliberately not repointed:
+
+| Host | Why |
+|------|-----|
+| `bittorrent` | DNS must stay on the VPN gateway; its firewall DROPs port 53 to anything else, which is the DNS-leak guard. The gateway forwards the local zone on to `dns`, so it still resolves hostnames. |
+| `ack-gateway` | Runs dnsmasq as the ACK network's resolver; its own resolver feeds that. |
+| `dns` | The resolver itself. |
+
+The router stays as a secondary nameserver everywhere, so external names
+still resolve if CT `dns` is down. Internal names will not -- that is the
+accepted trade.
+
+```bash
+./15-setup-dns.sh              # sync records, forwarders, and clients
+./15-setup-dns.sh --dry-run    # preview, change nothing
+./15-setup-dns.sh --show       # list current records
 ```
