@@ -9,10 +9,10 @@
 #   ./13-setup-rakuen-web.sh --configure    # (internal) Run inside the container
 #
 # Creates a Debian 13 LXC (CT 121) single-homed on the LAN:
-#   eth0 = 192.168.1.121/23 on vmbr0
+#   eth0 on vmbr0
 #
 # Serves rakuensoftware.com as a static site via node serve on :3000.
-# nginx-proxy (192.168.1.118) handles TLS termination and proxies here.
+# nginx-proxy handles TLS termination and proxies here.
 #
 # The site (RakuenSoftware/rakuensoftware-web) is a Vite + React SPA. It is
 # built in-container, so unknown paths must be rewritten to index.html --
@@ -27,9 +27,9 @@ _LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/nu
 # Container specification
 # ---------------------------------------------------------------------------
 
-CTID=121
+CTID="${RAKUEN_WEB_CTID:-107}"
 HOSTNAME="rakuen-web"
-LAN_IP="192.168.1.121"
+LAN_IP="192.168.1.${CTID}"
 # Deliberately larger than personal-web (256MB/1core/4GB): this site runs
 # `npm install` and a Vite production build inside the container, which OOMs
 # at 256MB. The running footprint afterwards is still just `serve`.
@@ -86,7 +86,7 @@ rakuen-web is ready.
 
 IP:   $LAN_IP (eth0, vmbr0)
 Site: rakuensoftware.com (static files via node serve on :3000)
-TLS:  handled by nginx-proxy (192.168.1.118)
+TLS:  handled by nginx-proxy
 
 Firewall: :3000 from LAN (192.168.0.0/23), SSH from LAN
 ================================================================

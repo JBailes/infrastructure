@@ -9,11 +9,16 @@
 #   - Promtail (ships Proxmox syslog/pveproxy/journal to Loki)
 #
 # pve-exporter authenticates to the Proxmox API via a read-only API token.
-# Promtail pushes to Loki at 192.168.1.100:3100 (external interface, TLS + API key).
+# Promtail pushes to Loki at obs:3100 (external interface, TLS + API key).
 
 set -euo pipefail
 
-LOKI_URL="https://192.168.1.100:3100/loki/api/v1/push"
+# Sourced for host_ip()/OBS_HOST: the firewall rule below needs a literal
+# address, and resolving it beats writing one down here.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/common.sh"
+
+LOKI_URL="https://obs:3100/loki/api/v1/push"
 LOKI_TENANT="proxmox"
 PVE_EXPORTER_PORT="9221"
 PVE_ETC="/etc/pve-exporter"
@@ -30,8 +35,8 @@ info() { echo "==> $*"; }
 
 prechecks() {
     info "Running prechecks"
-    curl -sf -k "https://192.168.1.100:3100/ready" &>/dev/null \
-        || echo "WARN: Loki not reachable at 192.168.1.100:3100 yet" >&2
+    curl -sf -k "https://obs:3100/ready" &>/dev/null \
+        || echo "WARN: Loki not reachable at obs:3100 yet" >&2
     # Proxmox API must be listening (don't need to authenticate, just verify port is open)
     curl -sk -o /dev/null -w "" "https://localhost:8006/" &>/dev/null \
         || err "Proxmox API not reachable on port 8006"
@@ -202,10 +207,16 @@ EOF
 # ---------------------------------------------------------------------------
 
 configure_firewall() {
-    info "Allowing Prometheus scrape on port $PVE_EXPORTER_PORT from obs"
+    # iptables needs a literal source address, so resolve the name here rather
+    # than keeping one written down in this script.
+    local OBS_ADDR
+    OBS_ADDR="$(host_ip "$OBS_HOST")" \
+        || err "Could not resolve $OBS_HOST -- cannot write the scrape firewall rule"
+
+    info "Allowing Prometheus scrape on port $PVE_EXPORTER_PORT from $OBS_HOST ($OBS_ADDR)"
     # Use iptables directly
-    iptables -C INPUT -s 192.168.1.100 -p tcp --dport "$PVE_EXPORTER_PORT" -j ACCEPT 2>/dev/null \
-        || iptables -A INPUT -s 192.168.1.100 -p tcp --dport "$PVE_EXPORTER_PORT" -j ACCEPT
+    iptables -C INPUT -s "$OBS_ADDR" -p tcp --dport "$PVE_EXPORTER_PORT" -j ACCEPT 2>/dev/null \
+        || iptables -A INPUT -s "$OBS_ADDR" -p tcp --dport "$PVE_EXPORTER_PORT" -j ACCEPT
     # Persist (create directory if needed)
     if command -v iptables-save &>/dev/null; then
         mkdir -p /etc/iptables

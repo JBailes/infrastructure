@@ -10,14 +10,14 @@
 #   ./01-setup-vpn-gateway.sh --configure    # (internal) Run inside the VM
 #
 # Creates a Debian 13 cloud-init VM (VMID 104):
-#   eth0 = 192.168.1.104/23 on vmbr0 (LAN)
+#   eth0 on vmbr0 (LAN)
 #
 # Prerequisites (must exist alongside this script before running):
 #   secrets/client.ovpn   -- OpenVPN client config file
 #   secrets/auth.txt      -- credentials file (username on line 1, password on line 2)
 #
 # This VM acts as a VPN gateway for the LAN. Any device that sets its
-# default gateway (and DNS) to 192.168.1.104 will have all traffic routed
+# default gateway (and DNS) to this VM will have all traffic routed
 # through the VPN tunnel. A kill switch ensures forwarded traffic is NEVER
 # sent unencrypted.
 #
@@ -40,7 +40,7 @@ configure() {
     SECRETS_DIR="/root/secrets"
     VPN_CONF_SRC="${SECRETS_DIR}/client.ovpn"
     VPN_AUTH_SRC="${SECRETS_DIR}/auth.txt"
-    APT_CACHE="192.168.1.115"
+    APT_CACHE="apt-cache"
     APT_CACHE_PORT="3142"
 
     err()  { echo "ERROR: $*" >&2; exit 1; }
@@ -311,14 +311,14 @@ DNS
     cat <<EOF
 
 ================================================================
-vpn-gateway setup complete (192.168.1.104).
+vpn-gateway setup complete.
 
 VPN:         $VPN_REMOTE:$VPN_PORT/$VPN_PROTO
 Kill switch: Active (FORWARD only through tun0, DROP if tunnel down)
-DNS:         dnsmasq on 192.168.1.104:53 (forwarding to VPN DNS)
+DNS:         dnsmasq on this host :53 (forwarding to VPN DNS)
 apt proxy:   ${APT_CACHE}:${APT_CACHE_PORT}
 
-To use: set a device's default gateway and DNS to 192.168.1.104.
+To use: set a device's default gateway and DNS to this host.
 To stop: set the device's gateway and DNS back to 192.168.1.1.
 ================================================================
 EOF

@@ -1,5 +1,14 @@
 # Proposal: ACK Database Host and tngdb Migration
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+
+
 **Status:** Complete
 **Date:** 2026-03-27
 **Affects:** ACK network, homelab/ack/bootstrap/, observability
@@ -8,7 +17,7 @@
 
 ## Problem
 
-The ACK MUD servers currently connect to a PostgreSQL database running outside the ACK network (192.168.1.112, the existing tngdb host on the home LAN). This has several issues:
+The ACK MUD servers currently connect to a PostgreSQL database running outside the ACK network (the legacy tngdb host on the home LAN, since retired). This has several issues:
 
 1. **Network isolation violation.** ACK hosts on vmbr2 (10.1.0.0/24) must route through ack-gateway to reach a LAN database, breaking the isolation model.
 2. **No observability.** The existing database has no Prometheus metrics, no postgres_exporter, and no log shipping to the obs stack.
@@ -24,7 +33,7 @@ The ACK MUD servers need a PostgreSQL database on the ACK private network, boots
 1. A dedicated PostgreSQL host on the ACK network, bootstrapped by a script
 2. MUD servers connect to the database over the local ACK network (no LAN routing)
 3. postgres_exporter and Promtail ship metrics and logs to obs
-4. Migration path from the existing tngdb database (192.168.1.112) to the new host
+4. Migration path from the existing tngdb database on the legacy host to the new host
 5. tngdb API can optionally connect to the new host if needed
 
 ---
@@ -44,14 +53,14 @@ The ACK MUD servers need a PostgreSQL database on the ACK private network, boots
 | Hostname | `ack-db` |
 | CTID | 246 (next in ACK range 240-254) |
 | Type | LXC |
-| IP | 10.1.0.246 |
+| Host | CT 246 `ack-db` |
 | Bridge | vmbr2 |
 | Privileged | no |
 | Disk | 32 GB |
 | RAM | 1024 MB |
 | Cores | 1 |
 
-Single-homed on the ACK network. MUD servers connect via 10.1.0.246:5432. No external interface needed.
+Single-homed on the ACK network. MUD servers connect via CT 246 `ack-db`:5432. No external interface needed.
 
 ---
 
@@ -99,12 +108,12 @@ The `ack_readonly` user is also allowed from the LAN (192.168.1.0/23) so the tng
 New: `homelab/ack/bootstrap/03-setup-ack-db.sh`
 
 1. Installs PostgreSQL 17 via pgdg
-2. Self-signed SSL cert (CN=ack-db, SAN=IP:10.1.0.246)
+2. Self-signed SSL cert (CN=ack-db, SAN=IP:<ack-db address>)
 3. Creates `acktng` database, `ack` and `ack_readonly` users
 4. Configures pg_hba for ACK network access
 5. Installs postgres_exporter on :9187
-6. Firewall: allow PostgreSQL from 10.1.0.0/24, allow postgres_exporter from obs (10.1.0.100)
-7. Configures DNS (ack-gateway at 10.1.0.240) and apt proxy
+6. Firewall: allow PostgreSQL from 10.1.0.0/24, allow postgres_exporter from obs (CT 104 `obs`)
+7. Configures DNS (CT 240 `ack-gateway`) and apt proxy
 
 ### Bootstrap order
 
@@ -114,7 +123,7 @@ Runs after ack-gateway (step 00) and before MUD servers (step 01). The ACK orche
 
 ## Migration
 
-### Data migration from existing tngdb (192.168.1.112)
+### Data migration from existing tngdb (legacy host, since retired)
 
 1. `pg_dump` the `acktng` database from the existing host
 2. `pg_restore` into the new ack-db host
@@ -136,17 +145,17 @@ Restart each MUD server. No schema changes, no code changes.
 
 ### tngdb API cutover (optional)
 
-Update the tngdb `DATABASE_URL` environment variable to point to `10.1.0.246` (via the ACK network or LAN). The read-only user (`ack_readonly`) is allowed from both networks.
+Update the tngdb `DATABASE_URL` environment variable to point to CT 246 `ack-db` (via the ACK network or LAN). The read-only user (`ack_readonly`) is allowed from both networks.
 
 ### Rollback
 
-If migration fails, revert `data/db.conf` to point back to 192.168.1.112 and restart. No data loss possible since the old database is not modified during migration.
+If migration fails, revert `data/db.conf` to point back to the legacy host and restart. No data loss possible since the old database is not modified during migration.
 
 ---
 
 ## Observability
 
-- **postgres_exporter** on :9187, scraped by Prometheus on obs (10.1.0.100)
+- **postgres_exporter** on :9187, scraped by Prometheus on obs (CT 104 `obs`)
 - **Promtail** ships PostgreSQL and system logs to Loki (tenant: ack) via `02-setup-promtail.sh`
 - **Prometheus scrape target** added to the `ack` job in obs's prometheus.yml
 
@@ -158,10 +167,10 @@ If migration fails, revert `data/db.conf` to point back to 192.168.1.112 and res
 |----------|------|--------|
 | `homelab/ack/bootstrap/` | `03-setup-ack-db.sh` | New: PostgreSQL host bootstrap |
 | `homelab/ack/bootstrap/` | `pve-setup-ack.sh` | Add ack-db to HOSTS array, create between gateway and MUD servers |
-| `homelab/ack/bootstrap/` | `01-setup-ack-mud.sh` | Update default db.conf path to point to 10.1.0.246 |
+| `homelab/ack/bootstrap/` | `01-setup-ack-mud.sh` | Update default db.conf path to point to CT 246 `ack-db` |
 | `homelab/ack/` | `README.md` | Add ack-db to hosts table |
 | `homelab/ack/` | `diagrams.md` | Add ack-db to topology and host reference |
-| `homelab/bootstrap/` | `03-setup-obs.sh` | Add ack-db (10.1.0.246:9187) to Prometheus ack scrape targets |
+| `homelab/bootstrap/` | `03-setup-obs.sh` | Add ack-db (CT 246 `ack-db`:9187) to Prometheus ack scrape targets |
 | `architecture.md` | | Add ack-db to ACK guest summary |
 
 ---

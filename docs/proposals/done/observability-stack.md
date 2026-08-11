@@ -1,5 +1,16 @@
 # Proposal: Observability Stack (Logging, Metrics, and Alerting)
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+>
+> The WOL network described here has since been decommissioned.
+
+
 **Status:** Active
 **Date:** 2026-03-26 (revised 2026-03-27)
 **Affects:** All WOL and ACK services, homelab bootstrap, Proxmox host
@@ -39,8 +50,8 @@ Every infrastructure proposal references a monitoring stack that does not exist 
 | CTID | 100 (static, homelab-managed) |
 | Type | LXC |
 | WOL IP | 10.0.0.100 (vmbr1) |
-| ACK IP | 10.1.0.100 (vmbr2) |
-| LAN IP | 192.168.1.100 (vmbr0) |
+| ACK IP | CT 104 `obs` (vmbr2) |
+| LAN IP | CT 104 `obs` (vmbr0) |
 | Privileged | no |
 | Disk | 64 GB |
 | RAM | 2048 MB |
@@ -58,7 +69,7 @@ All observability mTLS uses **cfssl CA exclusively**. SPIRE is not involved. Thi
 
 | Certificate | Issued by | CN | SAN | Lifetime | Rotation | Purpose |
 |-------------|-----------|-----|-----|----------|----------|---------|
-| Loki server cert | cfssl CA | `obs` | DNS=obs, IP=10.0.0.100, IP=192.168.1.100, IP=10.1.0.100 | 24h | `enroll-host-certs.sh` on obs | TLS termination for Loki ingestion. SAN includes all three IPs. |
+| Loki server cert | cfssl CA | `obs` | DNS=obs, IP=10.0.0.100, IP=CT 104 `obs`, IP=CT 104 `obs` | 24h | `enroll-host-certs.sh` on obs | TLS termination for Loki ingestion. SAN includes all three IPs. |
 | Promtail client cert (per WOL host) | cfssl CA | `promtail` | | 24h | `enroll-host-certs.sh` on each host | mTLS client auth when pushing logs to Loki |
 | Prometheus client cert | cfssl CA | `prometheus` | | 24h | `enroll-host-certs.sh` on obs | mTLS client auth when scraping WOL service `/metrics` endpoints |
 
@@ -107,9 +118,9 @@ Loki uses `auth_enabled: true` with per-network tenants:
 | Tenant | Source | Auth | Interface |
 |--------|--------|------|-----------|
 | `wol` | WOL Promtail agents | mTLS (cfssl CA client cert) | eth1 (10.0.0.100) |
-| `ack` | ACK Promtail agents (5 MUD servers) | TLS (insecure_skip_verify) | eth2 (10.1.0.100) |
-| `homelab` | LAN Promtail agents (apt-cache, vpn-gateway, bittorrent) | TLS (insecure_skip_verify) | eth0 (192.168.1.100) |
-| `proxmox` | Proxmox host Promtail | TLS + API key | eth0 (192.168.1.100) |
+| `ack` | ACK Promtail agents (5 MUD servers) | TLS (insecure_skip_verify) | eth2 (CT 104 `obs`) |
+| `homelab` | LAN Promtail agents (apt-cache, vpn-gateway, bittorrent) | TLS (insecure_skip_verify) | eth0 (CT 104 `obs`) |
+| `proxmox` | Proxmox host Promtail | TLS + API key | eth0 (CT 104 `obs`) |
 
 Grafana has a separate Loki datasource provisioned for each tenant (wol, ack, homelab, proxmox) so logs are queryable independently.
 
@@ -214,7 +225,7 @@ WOL and wol-realm expose metrics via `prometheus-net`. The `/metrics` endpoint i
 
 **Metrics:** `prometheus-pve-exporter` runs on the Proxmox host (pip venv, systemd on :9221). Authenticates to the Proxmox API with a read-only token (`prometheus@pve!metrics`, PVEAuditor role). Prometheus scrapes it as `job_name: proxmox`.
 
-**Logs:** Promtail runs on the Proxmox host. Tails `/var/log/syslog`, `/var/log/pveproxy/access.log`, and the systemd journal. Pushes to Loki at `192.168.1.100:3100` (TLS + API key, `X-Scope-OrgID: proxmox`).
+**Logs:** Promtail runs on the Proxmox host. Tails `/var/log/syslog`, `/var/log/pveproxy/access.log`, and the systemd journal. Pushes to Loki at `CT 104 `obs`:3100` (TLS + API key, `X-Scope-OrgID: proxmox`).
 
 ---
 
@@ -268,7 +279,7 @@ Alertmanager groups alerts by severity:
 
 **`homelab/bootstrap/03-setup-obs.sh`** creates and configures the obs container (tri-homed on all three bridges). The script:
 
-1. Creates CT 100 with eth0 (vmbr0), eth1 (vmbr1), eth2 (vmbr2)
+1. Creates CT 104 `obs` with eth0 (vmbr0), eth1 (vmbr1), eth2 (vmbr2)
 2. Installs Loki, Promtail, Prometheus, Alertmanager, and Grafana
 3. Configures Loki with retention policies and multi-tenancy
 4. Configures Prometheus with scrape targets from all networks
@@ -288,15 +299,15 @@ Alertmanager groups alerts by severity:
 
 ### ACK Promtail deployment
 
-**`homelab/ack/bootstrap/02-setup-promtail.sh`** runs on each ACK MUD server (acktng, ack431, ack42, ack41, assault30) after obs is up. Configures Promtail to push to `https://10.1.0.100:3100` over TLS with `tenant_id: ack`. No mTLS (ACK hosts do not participate in the WOL PKI).
+**`homelab/ack/bootstrap/02-setup-promtail.sh`** runs on each ACK MUD server (acktng, ack431, ack42, ack41, assault30) after obs is up. Configures Promtail to push to `https://CT 104 `obs`:3100` over TLS with `tenant_id: ack`. No mTLS (ACK hosts do not participate in the WOL PKI).
 
 ### LAN Promtail deployment
 
-**`homelab/bootstrap/04-setup-promtail-lan.sh`** runs on each LAN homelab host (apt-cache, vpn-gateway, bittorrent) after obs is up. Configures Promtail to push to `https://192.168.1.100:3100` over TLS with `tenant_id: homelab`. Same auth pattern as ACK and Proxmox (TLS, no mTLS).
+**`homelab/bootstrap/04-setup-promtail-lan.sh`** runs on each LAN homelab host (apt-cache, vpn-gateway, bittorrent) after obs is up. Configures Promtail to push to `https://CT 104 `obs`:3100` over TLS with `tenant_id: homelab`. Same auth pattern as ACK and Proxmox (TLS, no mTLS).
 
 ### Proxmox host observability
 
-**`homelab/bootstrap/09-setup-proxmox-obs.sh`** runs on the Proxmox host itself (192.168.1.253). Installs `prometheus-pve-exporter` (pip venv, systemd on :9221) and Promtail (pushes to Loki at `192.168.1.100:3100`, tenant `proxmox`). Configures firewall to allow Prometheus scrape from obs.
+**`homelab/bootstrap/09-setup-proxmox-obs.sh`** runs on the Proxmox host itself (192.168.1.253). Installs `prometheus-pve-exporter` (pip venv, systemd on :9221) and Promtail (pushes to Loki at `CT 104 `obs`:3100`, tenant `proxmox`). Configures firewall to allow Prometheus scrape from obs.
 
 ### postgres_exporter deployment
 
@@ -379,6 +390,6 @@ obs does not run a SPIRE Agent. It is infrastructure, not a game service. mTLS f
 | `homelab/bootstrap/` | `ack/bootstrap/02-setup-promtail.sh` | New: Promtail for ACK hosts (5 MUD servers) |
 | `homelab/bootstrap/` | `04-setup-promtail-lan.sh` | New: Promtail for LAN homelab hosts (apt-cache, vpn-gateway, bittorrent) |
 | `wol/bootstrap/` | `19-setup-promtail.sh` | Existing: WOL Promtail (pushes to 10.0.0.100) |
-| `wol/bootstrap/` | `09-setup-proxmox-obs.sh` | Existing: Proxmox host observability (pushes to 192.168.1.100) |
+| `wol/bootstrap/` | `09-setup-proxmox-obs.sh` | Existing: Proxmox host observability (pushes to CT 104 `obs`) |
 | `wol/proxmox/` | `inventory.conf` | Remove obs from WOL inventory, add homelab-managed comment |
 | `wol/bootstrap/` | `00-setup-gateway.sh` | Update dnsmasq entry: `address=/obs/10.0.0.100` |

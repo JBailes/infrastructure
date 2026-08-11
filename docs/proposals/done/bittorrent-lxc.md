@@ -1,16 +1,25 @@
 # BitTorrent LXC
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+
+
 ## Problem
 
 Need a dedicated, isolated container for downloading torrents that guarantees
-all traffic goes through the VPN gateway (192.168.1.104). Completed downloads
+all traffic goes through the VPN gateway (VM 111 `smoothrouter`). Completed downloads
 must be accessible on the NAS at `192.168.1.254:/mnt/data/storage/bittorrent`.
 
 ## Approach
 
 Create an LXC running qBittorrent-nox (headless with web UI) that:
 
-1. Uses the VPN gateway (192.168.1.104) as its default gateway
+1. Uses the VPN gateway (VM 111 `smoothrouter`) as its default gateway
 2. Has its own local kill switch that blocks all outbound traffic not routed
    through the VPN gateway, as a second layer on top of the VPN gateway's
    own kill switch
@@ -31,8 +40,8 @@ non-VPN traffic from leaving the container.
 | CTID | auto (dynamically allocated from 100+) |
 | Hostname | `bittorrent` |
 | IP | `192.168.1.<CTID>/23` |
-| Gateway | `192.168.1.104` (VPN gateway, not 192.168.1.1) |
-| DNS | `192.168.1.104` (VPN gateway's dnsmasq) |
+| Gateway | VM 111 `smoothrouter` (VPN gateway, not 192.168.1.1) |
+| DNS | VM 111 `smoothrouter` (VPN gateway's dnsmasq) |
 | Network | `192.168.0.0/23` only |
 | Type | LXC (privileged) |
 | Template | Debian 12 |
@@ -54,7 +63,7 @@ with qBittorrent configured to use the `complete/` and `incomplete/` subdirector
 
 1. **qBittorrent-nox** (headless torrent client with web UI on port 80)
 2. **NFS mount** to NAS (auto-mount via fstab)
-3. **Local iptables kill switch** (outbound only through 192.168.1.104, everything else dropped)
+3. **Local iptables kill switch** (outbound only through VM 111 `smoothrouter`, everything else dropped)
 4. **Watchdog service** (systemd timer that checks the default route and VPN gateway reachability, stops qBittorrent if anything is wrong)
 
 ### Local kill switch (iptables)
@@ -96,8 +105,8 @@ gateway. This is independent of the VPN gateway's kill switch.
 
 A systemd timer (runs every 60 seconds) that:
 
-1. Checks the default route points to 192.168.1.104
-2. Pings 192.168.1.104 to verify the VPN gateway is reachable
+1. Checks the default route points to VM 111 `smoothrouter`
+2. Pings VM 111 `smoothrouter` to verify the VPN gateway is reachable
 3. If either check fails, immediately stops qBittorrent-nox and logs an alert
 4. On recovery (gateway reachable, route correct), restarts qBittorrent-nox
 
@@ -120,7 +129,7 @@ A systemd timer (runs every 60 seconds) that:
 5. Configure qBittorrent-nox (download paths, web UI port, interface binding)
 6. Install watchdog script and systemd timer
 7. Enable and start qBittorrent-nox and watchdog
-8. Verify: confirm default route is 192.168.1.104, NFS is mounted, web UI is reachable
+8. Verify: confirm default route is VM 111 `smoothrouter`, NFS is mounted, web UI is reachable
 
 ### Proxmox LXC creation
 

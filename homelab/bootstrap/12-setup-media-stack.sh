@@ -10,11 +10,11 @@
 #   ./12-setup-media-stack.sh --configure    # (internal) Run inside the container
 #
 # Creates a privileged Debian 13 LXC (CT 119):
-#   eth0 = 192.168.1.119/23 on vmbr0 (LAN, gateway = VPN gateway 192.168.1.104)
+#   eth0 on vmbr0 (LAN, gateway = VPN gateway the VPN gateway)
 #
 # Prerequisites:
-#   - VPN gateway (192.168.1.104) must be running
-#   - BitTorrent LXC (192.168.1.116) must be running with qBittorrent WebUI on :8080
+#   - VPN gateway the VPN gateway must be running
+#   - BitTorrent LXC (bittorrent) must be running with qBittorrent WebUI on :8080
 #   - NAS NFS export 192.168.1.254:/mnt/data/storage must be accessible
 #
 # Deploys via Docker Compose:
@@ -24,7 +24,7 @@
 #   - Lidarr     (music)              :8686
 #   - Readarr    (books/audiobooks)   :8787
 #
-# All services connect to qBittorrent at 192.168.1.116:8080 with per-app
+# All services connect to qBittorrent at bittorrent:8080 with per-app
 # download categories. NFS mount to NAS provides a single filesystem for
 # downloads + media libraries, enabling hardlinks.
 
@@ -37,13 +37,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ===================================================================
 
 configure() {
-    VPN_GATEWAY="192.168.1.104"
+    VPN_GATEWAY="the VPN gateway"
     NAS_EXPORT="192.168.1.254:/mnt/data/storage"
     MOUNT_POINT="/mnt/storage"
     LAN_IFACE="eth0"
-    APT_CACHE="192.168.1.115"
+    APT_CACHE="apt-cache"
     APT_CACHE_PORT="3142"
-    QBIT_HOST="192.168.1.116"
+    QBIT_HOST="bittorrent"
     QBIT_PORT="8080"
     MEDIA_UID=1000
     MEDIA_GID=1000
@@ -577,7 +577,7 @@ host_main() {
     source "$SCRIPT_DIR/lib/common.sh"
     [[ $EUID -eq 0 ]] || err "Run as root"
 
-    local ctid=119
+    local ctid="${MEDIA_STACK_CTID:-119}"
     local hostname="media-stack"
     local ip="192.168.1.${ctid}"
     local deploy_only=0

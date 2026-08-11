@@ -1,5 +1,14 @@
 # Proposal: Split Web Project into Three Repos and Hosts
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+
+
 **Status:** Pending
 **Date:** 2026-03-27
 **Affects:** `web/` repo, WOL bootstrap, ACK bootstrap, homelab bootstrap, nginx configs, DNS
@@ -59,7 +68,7 @@ These sites belong to different infrastructure domains. The AHA site is ACK-spec
 | Hostname | `ack-web` |
 | CTID | 247 (next in ACK range 240-254) |
 | Type | LXC |
-| ACK IP | 10.1.0.247 |
+| ACK IP | CT 247 `ack-web` |
 | External IP | 192.168.1.247 |
 | Bridges | vmbr2 (ACK) + vmbr0 (LAN, for HTTPS/certbot) |
 | Disk | 8 GB |
@@ -106,7 +115,7 @@ If the WOL Blazor client is purely static (WASM connecting to wol-a via WebSocke
 | Hostname | personal-web |
 | CTID | 117 (next available in homelab range) |
 | Type | LXC |
-| LAN IP | 192.168.1.117 |
+| LAN IP | CT 106 `personal-web` |
 | Bridge | vmbr0 (LAN only) |
 | Disk | 4 GB |
 | RAM | 256 MB |
@@ -131,13 +140,13 @@ Single-homed on the LAN. Serves a static React SPA via nginx. No API, no .NET ru
 ### Phase 2: Create new hosts
 
 1. Bootstrap `ack-web` (CT 247) on the ACK network
-2. Bootstrap `personal-web` (CT 117) on the LAN
+2. Bootstrap `personal-web` (CT 106 `personal-web`) on the LAN
 3. Update `web` (CT 209) to serve only ackmud.com
 
 ### Phase 3: DNS cutover
 
 1. Point `aha.ackmud.com` A record to 192.168.1.247 (ack-web)
-2. Point `bailes.us` A record to 192.168.1.117 (personal-web)
+2. Point `bailes.us` A record to CT 106 `personal-web` (personal-web)
 3. `ackmud.com` stays on 192.168.1.209 (wol-web)
 
 ### Phase 4: Decommission

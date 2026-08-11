@@ -117,78 +117,33 @@ configure_blackbox_scrape() {
     params:
       module: [http_2xx]
     static_configs:
-      - targets: ['http://10.1.0.247:5000/health']
+      - targets: ['http://ack-web:5000/health']
         labels:
           name: ack-web
-      - targets: ['http://10.1.0.248:8000/health']
+      - targets: ['http://tng-ai:8000/health']
         labels:
           name: tng-ai
-      - targets: ['http://10.1.0.249:8000/health']
+      - targets: ['http://tngdb:8000/health']
         labels:
           name: tngdb
-      - targets: ['http://192.168.1.105:32400/identity']
-        labels:
-          name: plex
-      - targets: ['http://192.168.1.108']
-        labels:
-          name: adguard
-      - targets: ['http://192.168.1.109:8096/emby/system/info/public']
-        labels:
-          name: emby
-      - targets: ['http://192.168.1.120:47989/pin/']
-        labels:
-          name: wolf
-      - targets: ['http://192.168.1.120:8080']
-        labels:
-          name: wolf-den
-      - targets: ['http://192.168.1.116:8080']
+      - targets: ['http://bittorrent:8080']
         labels:
           name: bittorrent
-      - targets: ['http://192.168.1.119:9696/ping']
-        labels:
-          name: prowlarr
-      - targets: ['http://192.168.1.119:8989/ping']
-        labels:
-          name: sonarr
-      - targets: ['http://192.168.1.119:8990/ping']
-        labels:
-          name: sonarr-anime
-      - targets: ['http://192.168.1.119:7878/ping']
-        labels:
-          name: radarr
-      - targets: ['http://192.168.1.119:8686/ping']
-        labels:
-          name: lidarr
-      - targets: ['http://192.168.1.119:8787/ping']
-        labels:
-          name: readarr
-      - targets: ['http://192.168.1.117:3000']
+      - targets: ['http://personal-web:3000']
         labels:
           name: personal-web
-      - targets: ['http://192.168.1.118/health']
+      - targets: ['http://rakuen-web:3000']
+        labels:
+          name: rakuen-web
+      - targets: ['http://nginx-proxy/health']
         labels:
           name: nginx-proxy
-      - targets: ['http://10.0.0.115:8080/health']
+      - targets: ['http://obs:3000/api/health']
         labels:
-          name: apt-cache
-      - targets: ['http://10.0.0.204:8080/ready']
+          name: obs
+      - targets: ['http://dns:5380']
         labels:
-          name: spire-server
-      - targets: ['http://10.0.0.209:5000/health']
-        labels:
-          name: wol-web
-      - targets: ['http://10.0.0.210:8443/health']
-        labels:
-          name: wol-realm-prod
-      - targets: ['http://10.0.1.215:8443/health']
-        labels:
-          name: wol-realm-test
-      - targets: ['http://10.0.0.212:8443/health']
-        labels:
-          name: wol-ai-prod
-      - targets: ['http://10.0.1.217:8443/health']
-        labels:
-          name: wol-ai-test
+          name: dns
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target
@@ -203,13 +158,13 @@ configure_blackbox_scrape() {
     params:
       module: [https_2xx]
     static_configs:
-      - targets: ['https://192.168.1.102:8443']
+      - targets: ['https://unifi:8443']
         labels:
           name: unifi
-      - targets: ['https://192.168.1.110:8007']
+      - targets: ['https://aimee-main:8443']
         labels:
-          name: pbs
-      - targets: ['https://192.168.1.254']
+          name: aimee-main
+      - targets: ['https://nas']
         labels:
           name: truenas
     relabel_configs:
@@ -220,43 +175,34 @@ configure_blackbox_scrape() {
       - target_label: __address__
         replacement: 'localhost:9115'
 
-  # Blackbox TCP probes (network appliances without HTTP endpoints)
+  # Blackbox TCP probes (services without HTTP endpoints)
   - job_name: blackbox-tcp
     metrics_path: /probe
     params:
       module: [tcp_connect]
     static_configs:
-      - targets: ['10.0.0.200:53']
-        labels:
-          name: wol-gateway-a
-      - targets: ['10.0.0.201:53']
-        labels:
-          name: wol-gateway-b
-      - targets: ['10.0.0.208:6969']
-        labels:
-          name: wol-a
-      - targets: ['10.1.0.240:53']
-        labels:
-          name: ack-gateway
-      - targets: ['10.1.0.241:4000']
+      - targets: ['acktng:8890']
         labels:
           name: acktng
-      - targets: ['10.1.0.242:4000']
+      - targets: ['ack431:4000']
         labels:
           name: ack431
-      - targets: ['10.1.0.243:4000']
+      - targets: ['ack42:4000']
         labels:
           name: ack42
-      - targets: ['10.1.0.244:4000']
+      - targets: ['ack41:4000']
         labels:
           name: ack41
-      - targets: ['10.1.0.245:4000']
+      - targets: ['assault30:4000']
         labels:
           name: assault30
-      - targets: ['10.1.0.250:4000']
+      - targets: ['ackfuss:4000']
         labels:
           name: ackfuss
-      - targets: ['192.168.1.101:2222']
+      - targets: ['apt-cache:3142']
+        labels:
+          name: apt-cache
+      - targets: ['deploy:22']
         labels:
           name: deploy
     relabel_configs:
@@ -266,6 +212,8 @@ configure_blackbox_scrape() {
         target_label: instance
       - target_label: __address__
         replacement: 'localhost:9115'
+
+
 YAML
 
     if ! systemctl reload prometheus 2>/dev/null; then
@@ -834,37 +782,17 @@ Dashboards provisioned on Grafana:
   2. Host Utilization -- CPU and memory per container (pve_exporter)
 
 Blackbox probes added for:
-  - tng-ai (10.1.0.248:8000)
-  - tngdb (10.1.0.249:8000)
-  - plex (192.168.1.105:32400)
-  - adguard (192.168.1.108:80)
-  - emby (192.168.1.109:8096)
-  - wolf (192.168.1.120:47989)
-  - wolf-den (192.168.1.120:8080)
-  - bittorrent (192.168.1.116:8080)
-  - prowlarr (192.168.1.119:9696)
-  - sonarr (192.168.1.119:8989)
-  - sonarr-anime (192.168.1.119:8990)
-  - radarr (192.168.1.119:7878)
-  - lidarr (192.168.1.119:8686)
-  - readarr (192.168.1.119:8787)
-  - personal-web (192.168.1.117:3000)
-  - nginx-proxy (192.168.1.118:80)
-  - unifi (192.168.1.102:8443, HTTPS)
-  - pbs (192.168.1.110:8007, HTTPS)
-  - truenas (192.168.1.254:443, HTTPS)
-  - wol-gateway-a (10.0.0.200:53, TCP)
-  - wol-gateway-b (10.0.0.201:53, TCP)
-  - ack-gateway (10.1.0.240:53, TCP)
-  - acktng (10.1.0.241:4000, TCP)
-  - ack431 (10.1.0.242:4000, TCP)
-  - ack42 (10.1.0.243:4000, TCP)
-  - ack41 (10.1.0.244:4000, TCP)
-  - assault30 (10.1.0.245:4000, TCP)
-  - ackfuss (10.1.0.250:4000, TCP)
-  - deploy (192.168.1.101:2222, TCP)
 
-Open Grafana at http://192.168.1.100 to view.
+  HTTP   ack-web, tng-ai, tngdb, bittorrent, personal-web,
+         rakuen-web, nginx-proxy, obs, dns
+  HTTPS  unifi, aimee-main, truenas
+  TCP    acktng, ack431, ack42, ack41, assault30, ackfuss,
+         apt-cache, deploy
+
+Targets are named, not numbered: they resolve through the local DNS
+server, so a renumber does not silently break monitoring.
+
+Open Grafana at http://obs to view.
 ================================================================
 EOF
 }

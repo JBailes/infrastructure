@@ -1,11 +1,17 @@
 # LLM Inference Benchmarks
 
-## Current Production (2026-04-24)
+> **These benchmarks describe the retired `qwen103` container.** That CTID has since been
+> reassigned to `apt-cache`, and the current LLM inference host is CT 140 `tierA-5080`.
+> Everything below is retained as a measurement record for the 7900XTX / Vulkan setup;
+> it does not describe the running inference host. References to "CT 103" below mean the
+> historical `qwen103` container, not the current occupant of that CTID.
 
-- **Hardware:** AMD Radeon RX 7900 XTX (24 GB VRAM), Proxmox LXC container (VMID 103, "qwen103")
+## Benchmarked Configuration (2026-04-24)
+
+- **Hardware:** AMD Radeon RX 7900 XTX (24 GB VRAM), Proxmox LXC container `qwen103`
 - **Backend:** llama.cpp (build b8876-72d693e4f), Vulkan (Mesa RADV 25.2.8, Vulkan 1.4.318)
 - **Server flags:** `--gpu-layers -1 --ctx-size 131072 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --device Vulkan0 --parallel 1 --batch-size 1024 --ubatch-size 512 --jinja --reasoning off`
-- **Host:** 192.168.1.103:8080, OpenAI-compatible API
+- **Host:** `qwen103` on :8080, OpenAI-compatible API
 - **Model:** Qwen3.6-27B Q4_K_M (`Qwen3.6-27B-Q4_K_M.gguf`, 17 GB on disk, 26.90B params, native `ctx_train` = 262144)
 
 ### Measured throughput (API-timed via `/v1/chat/completions`)
@@ -45,7 +51,7 @@ The sections below were captured on the predecessor container (CT 103, "ollama")
 - **Hardware:** AMD Radeon RX 7900 XTX (24 GB VRAM), Proxmox LXC container (VMID 103, "ollama")
 - **Backend:** llama.cpp (build 95a6eba), Vulkan (RADV NAVI31)
 - **Server:** llama-server, `--gpu-layers 99 --flash-attn on --parallel 2`
-- **Host:** 192.168.1.103:8080, OpenAI-compatible API
+- **Host:** `qwen103` on :8080, OpenAI-compatible API
 - **Date:** 2026-04-02
 
 ## Backend Selection: Vulkan vs ROCm
@@ -160,7 +166,7 @@ Early tests were run with `max_tokens: 4096` due to a script bug. Both GLM and Q
 
 ## Production Configuration (historical — CT 103, 2026-04-02)
 
-> Superseded by the current production section at the top of this document (CT 103 / Qwen3.6-27B at 128k). Retained for historical context.
+> Superseded by the benchmarked configuration at the top of this document (`qwen103` / Qwen3.6-27B at 128k). Retained for historical context.
 
 ```
 Model:    Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-v2 (Jackrong) Q4_K_M

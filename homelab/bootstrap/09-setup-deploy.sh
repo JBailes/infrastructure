@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# 09-setup-deploy.sh -- Set up the deployment container (quad-homed)
+# 09-setup-deploy.sh -- Set up the deployment container (dual-homed)
 #
-# Runs on: deploy, Debian 13 LXC (quad-homed)
-#   eth0 = 192.168.1.101/23 on vmbr0 (Home LAN, internet-facing SSH)
-#   eth1 = 10.0.0.101/20 on vmbr1 (WOL prod)
+# Runs on: deploy, Debian 13 LXC (dual-homed)
+#   eth0 on vmbr0 (Home LAN, internet-facing SSH)
 #   eth2 = 10.1.0.101/24 on vmbr2 (ACK private)
-#   eth3 = 10.0.1.101/24 on vmbr3 (WOL test)
 # CTID: 101
 #
 # Provides:
@@ -20,10 +18,8 @@
 
 set -euo pipefail
 
-LAN_IP="192.168.1.101"
-WOL_IP="10.0.0.101"
+LAN_IP="192.168.1.${CTID}"
 ACK_IP="10.1.0.101"
-WOL_TEST_IP="10.0.1.101"
 SSH_PORT="2222"
 
 err()  { echo "ERROR: $*" >&2; exit 1; }
@@ -52,7 +48,7 @@ configure() {
     cat <<EOF
 
 ================================================================
-deploy container is ready (quad-homed).
+deploy container is ready (dual-homed).
 
 LAN:      $LAN_IP (eth0, internet-facing SSH on :$SSH_PORT)
 WOL prod: $WOL_IP (eth1)

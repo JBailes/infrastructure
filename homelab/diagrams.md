@@ -2,6 +2,9 @@
 
 Visual reference for the homelab infrastructure. All diagrams use Mermaid syntax.
 
+Hosts are identified by CTID and hostname. Resolve current addresses on the
+Proxmox host with `pct list` / `qm list`.
+
 ---
 
 ## Network Topology
@@ -16,42 +19,55 @@ graph TB
         ROUTER["Router<br/>192.168.1.1"]
 
         subgraph HOMELAB["Homelab Services"]
-            APTCACHE["apt-cache<br/>192.168.1.115 (vmbr0)<br/>10.0.0.115 (vmbr1)<br/>10.1.0.115 (vmbr2)<br/>apt-cacher-ng :3142"]
-            OBS["obs<br/>192.168.1.100 (vmbr0)<br/>10.0.0.100 (vmbr1)<br/>10.1.0.100 (vmbr2)<br/>Loki / Prometheus / Grafana"]
-            VPN["vpn-gateway<br/>192.168.1.104<br/>OpenVPN + kill switch"]
-            BT["bittorrent<br/>192.168.1.116<br/>qBittorrent-nox"]
-            NGINX["nginx-proxy<br/>192.168.1.118 (vmbr0)<br/>10.0.0.118 (vmbr1)<br/>10.1.0.118 (vmbr2)<br/>nginx + certbot"]
-            PWEB["personal-web<br/>192.168.1.117<br/>node serve :3000"]
-            RWEB["rakuen-web<br/>192.168.1.121<br/>node serve :3000"]
-            WOLF["wolf<br/>192.168.1.120<br/>Moonlight streaming"]
-            LLM["qwen103<br/>192.168.1.103<br/>llama-server :8080<br/>Qwen3.6-27B @ 128k<br/>AMD 7900XTX (Vulkan)"]
+            APTCACHE["CT 103 apt-cache<br/>vmbr0 + vmbr2<br/>apt-cacher-ng :3142"]
+            OBS["CT 104 obs<br/>vmbr0 + vmbr2<br/>Loki / Prometheus / Grafana"]
+            VPN["VM 111 smoothrouter<br/>VPN gateway + kill switch"]
+            BT["CT 108 bittorrent<br/>qBittorrent-nox"]
+            NGINX["CT 105 nginx-proxy<br/>vmbr0 + vmbr2<br/>nginx + certbot"]
+            PWEB["CT 106 personal-web<br/>node serve :3000"]
+            RWEB["CT 107 rakuen-web<br/>node serve :3000"]
+            DEPLOY["CT 109 deploy<br/>vmbr0 + vmbr2<br/>GitHub Actions target"]
+            DNS["CT 101 dns<br/>Technitium :53"]
+            UNIFI["CT 102 unifi<br/>UniFi controller :8443"]
+            CODE["CT 100 code<br/>dev + tooling"]
+            AIMEE["CT 280 aimee-main<br/>Docker :8443 / :8743"]
+            WOLF["CT 113 wolf<br/>Moonlight streaming"]
+            LLM["CT 140 tierA-5080<br/>GPU LLM inference"]
         end
 
         NAS["NAS<br/>192.168.1.254<br/>NFS storage"]
-        PVE["Proxmox Host<br/>192.168.1.253"]
+        PVE["Proxmox Host<br/>pve<br/>192.168.1.253"]
     end
 
-    subgraph WOL["WOL Private Network (10.0.0.0/20)"]
-        WOLHOSTS["All WOL hosts"]
+    subgraph ACK["ACK Private Network (10.1.0.0/24)"]
+        ACKHOSTS["ACK hosts<br/>CT 240-250"]
     end
 
     INET --- ROUTER
     ROUTER --- VPN
     ROUTER --- APTCACHE
     VPN -->|"VPN tunnel<br/>(all traffic)"| INET
-    BT -->|"default gw<br/>192.168.1.104"| VPN
+    BT -->|"default gw"| VPN
     BT -->|"NFS :2049"| NAS
-    APTCACHE -.->|"apt proxy :3142<br/>(tri-homed)"| WOLHOSTS
-    OBS -.->|"log/metric ingestion<br/>(tri-homed)"| WOLHOSTS
+    APTCACHE -.->|"apt proxy :3142<br/>(dual-homed)"| ACKHOSTS
+    OBS -.->|"log/metric ingestion<br/>(dual-homed)"| ACKHOSTS
+    DEPLOY -.->|"deploys<br/>(dual-homed)"| ACKHOSTS
     INET -->|":80/:443"| NGINX
     NGINX -->|"proxy"| PWEB
-    NGINX -.->|"proxy via vmbr1"| WOLHOSTS
+    NGINX -->|"proxy"| RWEB
+    NGINX -.->|"proxy via vmbr2"| ACKHOSTS
     PVE --- VPN
     PVE --- BT
     PVE --- APTCACHE
     PVE --- OBS
     PVE --- NGINX
     PVE --- PWEB
+    PVE --- RWEB
+    PVE --- DEPLOY
+    PVE --- DNS
+    PVE --- UNIFI
+    PVE --- CODE
+    PVE --- AIMEE
     PVE --- WOLF
     PVE --- LLM
 
@@ -61,9 +77,15 @@ graph TB
     style BT fill:#69f,stroke:#333,color:#000
     style NGINX fill:#f96,stroke:#333,color:#000
     style PWEB fill:#f96,stroke:#333,color:#000
+    style RWEB fill:#f96,stroke:#333,color:#000
+    style DEPLOY fill:#ccf,stroke:#333,color:#000
+    style DNS fill:#9cf,stroke:#333,color:#000
+    style UNIFI fill:#9cf,stroke:#333,color:#000
+    style CODE fill:#ddd,stroke:#333,color:#000
+    style AIMEE fill:#ddd,stroke:#333,color:#000
     style NAS fill:#fa0,stroke:#333,color:#000
     style PVE fill:#ccc,stroke:#333,color:#000
-    style WOLHOSTS fill:#ddd,stroke:#999,color:#333
+    style ACKHOSTS fill:#ddd,stroke:#999,color:#333
     style WOLF fill:#c6f,stroke:#333,color:#000
     style LLM fill:#f6c,stroke:#333,color:#000
 ```
@@ -72,32 +94,43 @@ graph TB
 
 ```mermaid
 graph LR
-    BT["bittorrent<br/>container"] -->|"1. default route"| VPN["vpn-gateway<br/>kill switch"]
+    BT["CT 108<br/>bittorrent"] -->|"1. default route"| VPN["VM 111 smoothrouter<br/>kill switch"]
     BT -->|"2. iptables OUTPUT"| FW["local firewall<br/>(DROP policy)"]
     BT -->|"3. watchdog"| WD["60s health check<br/>(stops qBittorrent)"]
 
     VPN -->|"tunnel up"| INET((Internet))
     VPN -->|"tunnel down"| DROP["DROPPED"]
 
-    FW -->|"only allows"| ALLOWED["192.168.1.104 (VPN gw)<br/>192.168.1.254 (NAS :2049)"]
+    FW -->|"blocks"| BLOCKED["the home router<br/>(no VPN bypass)"]
 
     style DROP fill:#f66,stroke:#333,color:#000
     style VPN fill:#4a9,stroke:#333,color:#000
 ```
 
+> On the running container the watchdog reads its expected gateway from
+> `/etc/vpn-watchdog.conf` and refuses to run if that value is absent, rather
+> than guessing. The `02-setup-bittorrent.sh` bootstrap script still hard-codes
+> the old gateway address and has not been updated to match.
+
 ## Host Reference
 
-| IP | Hostname | ID | Type | Role |
-|----|----------|------|------|------|
-| 192.168.1.115 (vmbr0), 10.0.0.115 (vmbr1), 10.1.0.115 (vmbr2) | apt-cache | 115 | LXC (unprivileged, tri-homed) | apt-cacher-ng package cache for all networks |
-| 192.168.1.100 (vmbr0), 10.0.0.100 (vmbr1), 10.1.0.100 (vmbr2) | obs | 215 | LXC (unprivileged, tri-homed) | Loki + Prometheus + Grafana + Alertmanager |
-| 192.168.1.104 | vpn-gateway | 104 | VM (cloud-init) | OpenVPN gateway with kill switch |
-| 192.168.1.116 | bittorrent | 116 | LXC (privileged) | qBittorrent-nox, triple VPN enforcement |
-| 192.168.1.117 | personal-web | 117 | LXC (unprivileged) | Static file server (bailes.us) on :3000 |
-| 192.168.1.119 | media-stack | 119 | LXC (privileged) | Prowlarr / Sonarr / Radarr / Lidarr / Readarr |
-| 192.168.1.121 | rakuen-web | 121 | LXC (unprivileged) | Static file server (rakuensoftware.com) on :3000 |
-| 192.168.1.118 (vmbr0), 10.0.0.118 (vmbr1), 10.1.0.118 (vmbr2) | nginx-proxy | 118 | LXC (unprivileged, tri-homed) | nginx reverse proxy + certbot TLS for all web sites |
-| 192.168.1.120 | wolf | 120 | LXC (privileged, GPU passthrough) | Wolf cloud gaming (Moonlight streaming) |
-| 192.168.1.103 | qwen103 | 103 | LXC (privileged, AMD 7900XTX via /dev/dri only) | llama.cpp (Vulkan) serving Qwen3.6-27B Q4_K_M at 128k context, OpenAI-compatible API on :8080 |
-| 192.168.1.253 | pve | N/A | Proxmox host | Hypervisor |
-| 192.168.1.254 | nas | N/A | NAS | NFS storage for downloads |
+| CTID | Hostname | Type | Role |
+|------|----------|------|------|
+| CT 100 | `code` | LXC | Development and tooling container |
+| CT 101 | `dns` | LXC | Technitium DNS (:53), admin UI :5380 |
+| CT 102 | `unifi` | LXC | UniFi Network controller (:8443) + MongoDB |
+| CT 103 | `apt-cache` | LXC (unprivileged, dual-homed vmbr0+vmbr2) | apt-cacher-ng package cache |
+| CT 104 | `obs` | LXC (unprivileged, dual-homed vmbr0+vmbr2) | Loki + Prometheus + Grafana + Alertmanager |
+| CT 105 | `nginx-proxy` | LXC (unprivileged, dual-homed vmbr0+vmbr2) | nginx reverse proxy + certbot TLS for all web sites |
+| CT 106 | `personal-web` | LXC (unprivileged) | Static file server (bailes.us) on :3000 |
+| CT 107 | `rakuen-web` | LXC (unprivileged) | Static file server (rakuensoftware.com) on :3000 |
+| CT 108 | `bittorrent` | LXC (privileged) | qBittorrent-nox, triple VPN enforcement |
+| CT 109 | `deploy` | LXC (dual-homed vmbr0+vmbr2) | GitHub Actions deployment target over SSH |
+| CT 113 | `wolf` | OCI (privileged, GPU passthrough) | Wolf cloud gaming (Moonlight streaming) |
+| CT 140 | `tierA-5080` | LXC (privileged, GPU) | LLM inference host (DHCP addressed) |
+| CT 280 | `aimee-main` | LXC | aimee agent host, Docker services :8443 / :8743 |
+| VM 111 | `smoothrouter` | VM (cloud-init) | VPN gateway with kill switch |
+| -- | `pve` (192.168.1.253) | Proxmox host | Hypervisor |
+| -- | `nas` (192.168.1.254) | NAS | NFS storage for downloads |
+
+CT 110 is a stopped OCI template, not a running service.

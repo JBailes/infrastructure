@@ -7,7 +7,7 @@
 # Installs Promtail, configures it to:
 #   - Read from the local systemd journal
 #   - Label with hostname and service name
-#   - Push to Loki at 192.168.1.100:3100 over TLS (tenant: homelab)
+#   - Push to Loki at obs:3100 over TLS (tenant: homelab)
 #
 # LAN hosts do not participate in the WOL PKI, so no mTLS is used.
 # TLS with insecure_skip_verify (same pattern as Proxmox host promtail).
@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-LOKI_URL="https://192.168.1.100:3100/loki/api/v1/push"
+LOKI_URL="https://obs:3100/loki/api/v1/push"
 PROMTAIL_ETC="/etc/promtail"
 HOSTNAME_LABEL=$(hostname)
 
@@ -33,8 +33,8 @@ info() { echo "==> $*"; }
 
 prechecks() {
     info "Running prechecks"
-    curl -sf -k "https://192.168.1.100:3100/ready" &>/dev/null \
-        || echo "WARN: Loki not reachable at 192.168.1.100:3100 yet" >&2
+    curl -sf -k "https://obs:3100/ready" &>/dev/null \
+        || echo "WARN: Loki not reachable at obs:3100 yet" >&2
     info "Prechecks passed"
 }
 
@@ -135,7 +135,7 @@ main() {
     configure_promtail
     write_systemd_unit
 
-    info "Promtail setup complete on $HOSTNAME_LABEL (pushing to Loki at 192.168.1.100:3100, tenant: homelab)"
+    info "Promtail setup complete on $HOSTNAME_LABEL (pushing to Loki at obs:3100, tenant: homelab)"
 }
 
 if [[ "${1:-}" == "--configure" ]]; then

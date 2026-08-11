@@ -1,5 +1,14 @@
 # Proposal: ACK! Network Service Bring-Up
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+
+
 **Status:** Complete
 **Date:** 2026-03-29
 **Affects:** ACK network, homelab/ack/bootstrap/, observability, acktng
@@ -12,7 +21,7 @@ The ACK! network infrastructure is fully built (gateway, containers, bootstrap s
 
 1. **MUD servers have no autostart.** The bootstrap clones source and builds, but there are no systemd units. Starting a MUD requires an SSH session and a manual `./startup &`. If the container restarts, the game is down until someone notices.
 2. **tng-ai is outside the ACK network.** The NPC dialogue AI runs on CT 111 (192.168.1.111) on the home LAN. acktng routes through ack-gateway to reach it, breaking the isolation model.
-3. **tngdb is outside the ACK network.** The read-only game content API runs on CT 112 (192.168.1.112), co-located with the legacy database host. It needs its own container on the ACK network.
+3. **tngdb is outside the ACK network.** The read-only game content API runs on CT 112 (the legacy ack-db host (retired)), co-located with the legacy database host. It needs its own container on the ACK network.
 4. **Legacy hosts to decommission.** CT 111 (tng-ai) and CT 112 (tngdb + legacy database) are LAN hosts that exist solely to serve the ACK ecosystem. Once their services are migrated to the ACK network, these containers serve no purpose and should be destroyed.
 5. **No observability for application-layer services.** Promtail ships system logs, but without systemd units there are no game logs in the journal. Blackbox TCP probes are configured in the dashboard but return red because the games aren't listening yet. tng-ai and tngdb have no monitoring at all.
 
@@ -21,8 +30,8 @@ The ACK! network infrastructure is fully built (gateway, containers, bootstrap s
 ## Goals
 
 1. All five MUD servers start automatically via systemd and survive container restarts
-2. tng-ai runs on the ACK network (CT 248, 10.1.0.248), bootstrapped by script
-3. tngdb runs on the ACK network (CT 249, 10.1.0.249), bootstrapped by script
+2. tng-ai runs on the ACK network (CT 248, CT 248 `tng-ai`), bootstrapped by script
+3. tngdb runs on the ACK network (CT 249, CT 249 `tngdb`), bootstrapped by script
 4. acktng reads `TNGAI_URL` from the environment, pointing at the ACK-local tng-ai
 5. All services are observable: logs in Loki, health in Prometheus, tiles on the dashboard
 6. Legacy LAN hosts CT 111 and CT 112 are decommissioned and destroyed
@@ -31,7 +40,7 @@ The ACK! network infrastructure is fully built (gateway, containers, bootstrap s
 
 ## Non-Goals
 
-- Database migration from 192.168.1.112 to ack-db. That is covered by the [ACK Database Host proposal](ack-database-host.md), which is a prerequisite for this work.
+- Database migration from the legacy ack-db host (retired) to ack-db. That is covered by the [ACK Database Host proposal](ack-database-host.md), which is a prerequisite for this work.
 - Rewriting tng-ai or tngdb application code. Only deployment and configuration.
 - TLS between ACK services. The network is isolated; plain HTTP is acceptable.
 - External access to tngdb. It serves the ACK network only (ack-web proxies or queries it).
@@ -40,7 +49,7 @@ The ACK! network infrastructure is fully built (gateway, containers, bootstrap s
 
 ## Prerequisites
 
-The [ACK Database Host proposal](ack-database-host.md) must be implemented first. MUD servers and tngdb both connect to the PostgreSQL database on ack-db (10.1.0.246). The database must be migrated and accessible before these services can start.
+The [ACK Database Host proposal](ack-database-host.md) must be implemented first. MUD servers and tngdb both connect to the PostgreSQL database on ack-db (CT 246 `ack-db`). The database must be migrated and accessible before these services can start.
 
 ---
 
@@ -53,13 +62,13 @@ The [ACK Database Host proposal](ack-database-host.md) must be implemented first
 | Hostname | `tng-ai` |
 | CTID | 248 |
 | Type | LXC (unprivileged) |
-| IP | 10.1.0.248 |
+| Host | CT 248 `tng-ai` |
 | Bridge | vmbr2 |
 | Disk | 4 GB |
 | RAM | 512 MB |
 | Cores | 1 |
 
-DNS entry already exists in ack-gateway dnsmasq (`address=/tng-ai/10.1.0.248`).
+DNS entry already exists in ack-gateway dnsmasq (`address=/tng-ai/CT 248 `tng-ai``).
 
 NPC dialogue AI service. Python/FastAPI, calls the Groq API for LLM responses. Needs outbound HTTPS to api.groq.com (routed through ack-gateway NAT). Listens on :8000.
 
@@ -70,7 +79,7 @@ NPC dialogue AI service. Python/FastAPI, calls the Groq API for LLM responses. N
 | Hostname | `tngdb` |
 | CTID | 249 |
 | Type | LXC (unprivileged) |
-| IP | 10.1.0.249 |
+| Host | CT 249 `tngdb` |
 | Bridge | vmbr2 |
 | Disk | 4 GB |
 | RAM | 256 MB |
@@ -78,7 +87,7 @@ NPC dialogue AI service. Python/FastAPI, calls the Groq API for LLM responses. N
 
 DNS entry must be added to ack-gateway dnsmasq.
 
-Read-only game content API. Python/FastAPI/asyncpg, serves helps, shelps, lores, and skills from the acktng database. Connects to ack-db (10.1.0.246:5432) using the `ack_readonly` user. Listens on :8000.
+Read-only game content API. Python/FastAPI/asyncpg, serves helps, shelps, lores, and skills from the acktng database. Connects to ack-db (CT 246 `ack-db`:5432) using the `ack_readonly` user. Listens on :8000.
 
 ---
 
@@ -182,8 +191,8 @@ The bootstrap creates `/etc/tng-ai/env` with a placeholder. The key must be prov
 ### Migration from CT 111
 
 1. Copy the Groq API key from CT 111's environment to `/etc/tng-ai/env` on CT 248
-2. Start tng-ai on CT 248, verify `curl http://10.1.0.248:8000/health`
-3. Update acktng's systemd unit to set `TNGAI_URL=http://10.1.0.248:8000/v1/chat` (or use the compiled default, which already points to 10.1.0.248 per the completed tng-ai-monitoring proposal)
+2. Start tng-ai on CT 248, verify `curl http://CT 248 `tng-ai`:8000/health`
+3. Update acktng's systemd unit to set `TNGAI_URL=http://CT 248 `tng-ai`:8000/v1/chat` (or use the compiled default, which already points to CT 248 `tng-ai` per the completed tng-ai-monitoring proposal)
 4. Restart acktng
 5. Decommission tng-ai on CT 111
 
@@ -198,7 +207,7 @@ The bootstrap creates `/etc/tng-ai/env` with a placeholder. The key must be prov
 3. Install Python 3, pip, venv, curl, ca-certificates
 4. Clone tngdb repo to `/opt/tngdb`
 5. Create venv, install requirements (`fastapi`, `uvicorn`, `asyncpg`)
-6. Write `/etc/tngdb/env` with `DATABASE_URL=postgres://ack_readonly:<password>@10.1.0.246/acktng`
+6. Write `/etc/tngdb/env` with `DATABASE_URL=postgres://ack_readonly:<password>@CT 246 `ack-db`/acktng`
 7. Create systemd unit (`tngdb.service`)
 8. Firewall: :8000 from ACK network, SSH from ACK network
 
@@ -234,18 +243,18 @@ The `ack_readonly` password is generated by the ack-db bootstrap and stored in `
 
 Once all services are migrated and verified on the ACK network, the legacy LAN containers are destroyed.
 
-### CT 112 (192.168.1.112)
+### CT 112 (the legacy ack-db host (retired))
 
 Currently runs: tngdb API + PostgreSQL database (the `acktng` database).
 
 After this proposal and the ack-database-host proposal are implemented:
-- The database lives on ack-db (CT 246, 10.1.0.246)
-- The tngdb API lives on CT 249 (10.1.0.249)
+- The database lives on ack-db (CT 246, CT 246 `ack-db`)
+- The tngdb API lives on CT 249 (CT 249 `tngdb`)
 - Nothing remains on CT 112
 
 **Decommission steps:**
 1. Verify tngdb on CT 249 is serving requests and ack-web is consuming it correctly
-2. Verify no other services or clients still reference 192.168.1.112
+2. Verify no other services or clients still reference the legacy ack-db host (retired)
 3. Stop CT 112: `pct stop 112`
 4. Destroy CT 112: `pct destroy 112`
 
@@ -253,7 +262,7 @@ After this proposal and the ack-database-host proposal are implemented:
 
 Currently runs: tng-ai service (NPC dialogue AI).
 
-After tng-ai is migrated to CT 248 (10.1.0.248):
+After tng-ai is migrated to CT 248 (CT 248 `tng-ai`):
 - acktng points at the ACK-local tng-ai
 - Nothing remains on CT 111
 
@@ -266,7 +275,7 @@ After tng-ai is migrated to CT 248 (10.1.0.248):
 ### Cleanup
 
 After both containers are destroyed:
-- Remove any Prometheus scrape targets or blackbox probes referencing 192.168.1.111 or 192.168.1.112
+- Remove any Prometheus scrape targets or blackbox probes referencing 192.168.1.111 or the legacy ack-db host (retired)
 - Remove any DNS entries or /etc/hosts references to the old IPs
 - Reclaim the CTIDs (111, 112) for future use
 
@@ -274,9 +283,9 @@ After both containers are destroyed:
 
 ## acktng TNGAI_URL
 
-The [tng-ai monitoring proposal](../complete/tng-ai-monitoring-and-env-var.md) (complete) already updated acktng to:
+The [tng-ai monitoring proposal](./tng-ai-monitoring-and-env-var.md) (complete) already updated acktng to:
 - Read `TNGAI_URL` from the environment at init time, falling back to the `#define` default
-- Set the `#define` default to `http://10.1.0.248:8000/v1/chat`
+- Set the `#define` default to `http://CT 248 `tng-ai`:8000/v1/chat`
 
 No code changes needed. The acktng systemd unit picks up the default URL. If tng-ai is temporarily unavailable, NPC dialogue silently fails (existing behavior).
 
@@ -292,10 +301,10 @@ Already deployed to all existing ACK hosts. New hosts (CT 248, CT 249) get Promt
 
 **Already configured** (in `08-setup-dashboards.sh`):
 - MUD servers: TCP probes on :4000 (`blackbox-tcp` job)
-- tng-ai: HTTP probe on `http://10.1.0.248:8000/health` (`blackbox-http` job)
+- tng-ai: HTTP probe on `http://CT 248 `tng-ai`:8000/health` (`blackbox-http` job)
 
 **New** (must be added):
-- tngdb: HTTP probe on `http://10.1.0.249:8000/health`
+- tngdb: HTTP probe on `http://CT 249 `tngdb`:8000/health`
 
 tngdb does not currently have a `/health` endpoint. A minimal one must be added (returns 200 with `{"status": "ok"}`). This is a one-line FastAPI route addition, not a rewrite.
 
@@ -323,7 +332,7 @@ The **ACK Services** panel in the Service Health dashboard already queries:
 | `homelab/ack/bootstrap/` | `06-setup-tngdb.sh` | New: tngdb host bootstrap |
 | `homelab/ack/bootstrap/` | `01-setup-ack-mud.sh` | Add systemd unit creation for MUD servers |
 | `homelab/ack/bootstrap/` | `pve-setup-ack.sh` | Add tng-ai and tngdb to HOSTS array, bootstrap in Phase 3 |
-| `homelab/ack/bootstrap/` | `00-setup-ack-gateway.sh` | Add tngdb DNS entry (`address=/tngdb/10.1.0.249`) |
+| `homelab/ack/bootstrap/` | `00-setup-ack-gateway.sh` | Add tngdb DNS entry (`address=/tngdb/CT 249 `tngdb``) |
 | `homelab/bootstrap/` | `08-setup-dashboards.sh` | Add tngdb blackbox HTTP probe target, add tngdb to ACK Services panel |
 | `homelab/ack/` | `README.md` | Add tng-ai and tngdb to hosts table, document systemd units |
 | `homelab/ack/` | `diagrams.md` | Add tng-ai and tngdb to topology, host reference |
@@ -337,7 +346,7 @@ The **ACK Services** panel in the Service Health dashboard already queries:
 Implementation follows the dependency chain:
 
 1. **ack-database-host proposal** (prerequisite, separate PR)
-   - Bootstrap ack-db, migrate data from 192.168.1.112
+   - Bootstrap ack-db, migrate data from the legacy ack-db host (retired)
 
 2. **MUD server autostart**
    - Add systemd unit creation to `01-setup-ack-mud.sh`
@@ -349,7 +358,7 @@ Implementation follows the dependency chain:
    - Add tngdb DNS to gateway dnsmasq
    - Add tngdb to HOSTS in orchestrator
    - Write `06-setup-tngdb.sh`
-   - Bootstrap CT 249, verify `curl http://10.1.0.249:8000/health`
+   - Bootstrap CT 249, verify `curl http://CT 249 `tngdb`:8000/health`
    - Add blackbox probe and dashboard panel
 
 4. **tng-ai**
@@ -363,7 +372,7 @@ Implementation follows the dependency chain:
    - Verify all services on the ACK network are healthy
    - Stop and destroy CT 112 (database + tngdb migrated)
    - Stop and destroy CT 111 (tng-ai migrated)
-   - Remove stale scrape targets, DNS entries, and references to 192.168.1.111 / 192.168.1.112
+   - Remove stale scrape targets, DNS entries, and references to 192.168.1.111 / the legacy ack-db host (retired)
 
 6. **Documentation**
    - Update README, diagrams, architecture

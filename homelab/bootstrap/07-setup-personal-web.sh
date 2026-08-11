@@ -9,10 +9,10 @@
 #   ./07-setup-personal-web.sh --configure    # (internal) Run inside the container
 #
 # Creates a Debian 13 LXC (CT 117) single-homed on the LAN:
-#   eth0 = 192.168.1.117/23 on vmbr0
+#   eth0 on vmbr0
 #
 # Serves bailes.us as a static site via node serve on :3000.
-# nginx-proxy (192.168.1.118) handles TLS termination and proxies here.
+# nginx-proxy handles TLS termination and proxies here.
 
 set -euo pipefail
 
@@ -23,9 +23,9 @@ _LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/nu
 # Container specification
 # ---------------------------------------------------------------------------
 
-CTID=117
+CTID="${PERSONAL_WEB_CTID:-106}"
 HOSTNAME="personal-web"
-LAN_IP="192.168.1.117"
+LAN_IP="192.168.1.${CTID}"
 RAM=256
 CORES=1
 DISK=4
@@ -76,7 +76,7 @@ personal-web is ready.
 
 IP:   $LAN_IP (eth0, vmbr0)
 Site: bailes.us (static files via node serve on :3000)
-TLS:  handled by nginx-proxy (192.168.1.118)
+TLS:  handled by nginx-proxy
 
 Firewall: :3000 from LAN (192.168.0.0/23), SSH from LAN
 ================================================================
