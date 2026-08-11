@@ -9,13 +9,14 @@
 #   ./06-setup-nginx-proxy.sh --configure    # (internal) Run inside the container
 #
 # Creates a Debian 13 LXC (CT 118) tri-homed on all three bridges:
-#   eth0 = 192.168.1.118/23 on vmbr0 (LAN, incoming HTTPS from router)
-#   eth1 = 10.0.0.118/20 on vmbr1 (WOL, reach wol-web)
-#   eth2 = 10.1.0.118/24 on vmbr2 (ACK, reach ack-web)
+#   eth0 on vmbr0 (LAN, incoming HTTPS from router)
+#   eth1 on vmbr2 (ACK, reach ack-web)
+#
+# The vmbr1 (WOL) interface was removed with the WOL decommission.
 #
 # Central nginx reverse proxy for all web sites. Handles TLS termination
 # via certbot and routes by Host header to the appropriate backend:
-#   ackmud.com      -> ack-web (10.1.0.247:5000) + stream for WSS ports
+#   ackmud.com      -> ack-web (ack-web:5000) + stream for WSS ports
 #   aha.ackmud.com  -> redirect to ackmud.com
 #   bailes.us       -> personal-web (personal-web:3000)
 #   rakuensoftware.com -> rakuen-web (rakuen-web:3000)
@@ -30,10 +31,9 @@ _LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/nu
 # Container specification
 # ---------------------------------------------------------------------------
 
-CTID=118
+CTID="${NGINX_PROXY_CTID:-105}"
 HOSTNAME="nginx-proxy"
-LAN_IP="192.168.1.118"
-WOL_IP="10.0.0.118"
+LAN_IP="192.168.1.${CTID}"
 ACK_IP="10.1.0.118"
 RAM=256
 CORES=1
@@ -51,8 +51,7 @@ host_main() {
     info "Creating nginx-proxy container (CTID $CTID)"
 
     create_lxc "$CTID" "$HOSTNAME" "$LAN_IP" "$RAM" "$CORES" "$DISK" "$ROUTER_GW" "$PRIVILEGED" \
-        --net1 "name=eth1,bridge=${PRIVATE_BRIDGE},ip=${WOL_IP}/20" \
-        --net2 "name=eth2,bridge=${ACK_BRIDGE},ip=${ACK_IP}/24" \
+        --net1 "name=eth1,bridge=${ACK_BRIDGE},ip=${ACK_IP}/24" \
     || { info "Container already exists, deploying config"; }
 
     pct start "$CTID" 2>/dev/null || true
@@ -87,18 +86,17 @@ configure() {
 nginx-proxy is ready (tri-homed).
 
 LAN:  $LAN_IP (eth0, vmbr0) -- incoming HTTPS from router
-WOL:  $WOL_IP (eth1, vmbr1) -- shared/private WOL reachability
-ACK:  $ACK_IP (eth2, vmbr2) -- reach ack-web (10.1.0.247:5000)
+ACK:  $ACK_IP (eth1, vmbr2) -- reach ack-web (ack-web:5000)
 
 Routing:
-  ackmud.com      -> http://10.1.0.247:5000 (ack-web)
+  ackmud.com      -> http://ack-web:5000 (ack-web)
   aha.ackmud.com  -> https://ackmud.com
   bailes.us       -> http://personal-web:3000 (personal-web)
   rakuensoftware.com -> http://rakuen-web:3000 (rakuen-web)
   rakuensoft.com  -> https://rakuensoftware.com (301)
-  WSS :18890      -> 10.1.0.247:18890
-  WSS :8891       -> 10.1.0.247:8891
-  WSS :8892       -> 10.1.0.247:8892
+  WSS :18890      -> ack-web:18890
+  WSS :8891       -> ack-web:8891
+  WSS :8892       -> ack-web:8892
 
 Caching proxy:
   :8080 -> dotnetcli.azureedge.net (cached .NET SDK/runtime downloads)
@@ -202,7 +200,7 @@ server {
     server_name ackmud.com www.ackmud.com;
 
     location / {
-        proxy_pass http://10.1.0.247:5000;
+        proxy_pass http://ack-web:5000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -211,7 +209,7 @@ server {
 
     # Preserve upgrade support for any ACK frontend websocket traffic.
     location /ws {
-        proxy_pass http://10.1.0.247:5000;
+        proxy_pass http://ack-web:5000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -300,15 +298,15 @@ NGINX
 stream {
     server {
         listen 18890;
-        proxy_pass 10.1.0.247:18890;
+        proxy_pass ack-web:18890;
     }
     server {
         listen 8891;
-        proxy_pass 10.1.0.247:8891;
+        proxy_pass ack-web:8891;
     }
     server {
         listen 8892;
-        proxy_pass 10.1.0.247:8892;
+        proxy_pass ack-web:8892;
     }
 }
 STREAM
@@ -344,7 +342,6 @@ configure_firewall() {
 
     # .NET caching proxy from all local networks
     iptables -A INPUT -s 192.168.0.0/23 -p tcp --dport 8080 -j ACCEPT
-    iptables -A INPUT -s 10.0.0.0/20 -p tcp --dport 8080 -j ACCEPT
     iptables -A INPUT -s 10.1.0.0/24 -p tcp --dport 8080 -j ACCEPT
 
     # Legacy MUD WSS ports from anywhere
