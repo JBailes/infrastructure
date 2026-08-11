@@ -782,37 +782,17 @@ Dashboards provisioned on Grafana:
   2. Host Utilization -- CPU and memory per container (pve_exporter)
 
 Blackbox probes added for:
-  - tng-ai (10.1.0.248:8000)
-  - tngdb (10.1.0.249:8000)
-  - plex (192.168.1.105:32400)
-  - adguard (192.168.1.108:80)
-  - emby (192.168.1.109:8096)
-  - wolf (wolf:47989)
-  - wolf-den (wolf:8080)
-  - bittorrent (192.168.1.116:8080)
-  - prowlarr (192.168.1.119:9696)
-  - sonarr (192.168.1.119:8989)
-  - sonarr-anime (192.168.1.119:8990)
-  - radarr (192.168.1.119:7878)
-  - lidarr (192.168.1.119:8686)
-  - readarr (192.168.1.119:8787)
-  - personal-web (192.168.1.117:3000)
-  - nginx-proxy (192.168.1.118:80)
-  - unifi (192.168.1.102:8443, HTTPS)
-  - pbs (192.168.1.110:8007, HTTPS)
-  - truenas (192.168.1.254:443, HTTPS)
-  - wol-gateway-a (10.0.0.200:53, TCP)
-  - wol-gateway-b (10.0.0.201:53, TCP)
-  - ack-gateway (10.1.0.240:53, TCP)
-  - acktng (10.1.0.241:4000, TCP)
-  - ack431 (10.1.0.242:4000, TCP)
-  - ack42 (10.1.0.243:4000, TCP)
-  - ack41 (10.1.0.244:4000, TCP)
-  - assault30 (10.1.0.245:4000, TCP)
-  - ackfuss (10.1.0.250:4000, TCP)
-  - deploy (192.168.1.101:2222, TCP)
 
-Open Grafana at http://192.168.1.100 to view.
+  HTTP   ack-web, tng-ai, tngdb, bittorrent, personal-web,
+         rakuen-web, nginx-proxy, obs, dns
+  HTTPS  unifi, aimee-main, truenas
+  TCP    acktng, ack431, ack42, ack41, assault30, ackfuss,
+         apt-cache, deploy
+
+Targets are named, not numbered: they resolve through the local DNS
+server, so a renumber does not silently break monitoring.
+
+Open Grafana at http://obs to view.
 ================================================================
 EOF
 }
