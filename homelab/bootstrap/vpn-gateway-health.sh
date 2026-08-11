@@ -48,17 +48,23 @@ SERVICE="routerd-vpn"
 # reconnect costs a working tunnel and risks the provider's rate limiter.
 STALL_LIMIT=10          # consecutive stalled checks (~10 min) before acting
 
-# Degradation, as distinct from death. Measured 2026-08-11: the tunnel served
-# 70+ MB/s immediately after a reconnect and 0.22 MB/s 32 minutes later, with
-# no load, no change in flow count, and RX advancing normally the whole time.
-# A reconnect restored it to 72 MB/s. Liveness checks cannot see this at all,
-# so throughput has to be sampled directly.
+# Not moving data, as distinct from being down. A tunnel can be up, routed and
+# advancing RX while carrying almost nothing, and no liveness check sees that,
+# so throughput is sampled directly.
 #
-# Threshold sits far below healthy (70 MB/s) and far above degraded (0.2 MB/s),
-# so it takes an unambiguous collapse to trigger. Sampled every Nth run to keep
-# the cost to a few MB an hour.
+# The threshold sits far below a good reading (40-70 MB/s) and far above a bad
+# one (0-0.2 MB/s), and is sampled every Nth run to keep the cost to a few MB
+# an hour.
 THROUGHPUT_MIN_BPS=5000000       # 5 MB/s
 THROUGHPUT_PROBE_EVERY=10        # runs between throughput samples (~10 min)
+# Throughput on this tunnel is ERRATIC, not monotonic: controlled sampling
+# showed 0 MB/s and 39 MB/s minutes apart with nothing changed, in both data
+# path modes, idle and loaded. A single bad probe is therefore normal and must
+# not trigger a reconnect. The outage this exists for lasted four days and
+# never self-recovered, so requiring several consecutive bad probes still
+# catches it quickly while ignoring ordinary dips.
+THROUGHPUT_FAIL_LIMIT=3          # consecutive bad probes (~30 min) before acting
+THROUGHPUT_FAIL_FILE="/run/vpn-gateway-health.slowcount"
 THROUGHPUT_PROBE_BYTES=3145728   # 3 MB range request
 THROUGHPUT_PROBE_URL="http://cachefly.cachefly.net/100mb.test"
 PROBE_COUNT_FILE="/run/vpn-gateway-health.probecount"
@@ -178,11 +184,23 @@ throughput_ok() {
     # liveness checks already cover a tunnel that is actually down.
     [[ -n "$bps" && "$bps" =~ ^[0-9]+$ && "$bps" -gt 0 ]] || return 0
 
-    if (( bps < THROUGHPUT_MIN_BPS )); then
-        log "DEGRADED: throughput $(( bps / 1024 )) KB/s is below $(( THROUGHPUT_MIN_BPS / 1048576 )) MB/s -- tunnel up but crawling"
-        return 1
+    if (( bps >= THROUGHPUT_MIN_BPS )); then
+        rm -f "$THROUGHPUT_FAIL_FILE"
+        return 0
     fi
-    return 0
+
+    local fails
+    fails=$(( $(cat "$THROUGHPUT_FAIL_FILE" 2>/dev/null || echo 0) + 1 ))
+    echo "$fails" > "$THROUGHPUT_FAIL_FILE"
+
+    if (( fails < THROUGHPUT_FAIL_LIMIT )); then
+        log "slow probe $(( bps / 1024 )) KB/s (${fails}/${THROUGHPUT_FAIL_LIMIT}) -- within normal variation, not acting"
+        return 0
+    fi
+
+    log "DEGRADED: throughput below $(( THROUGHPUT_MIN_BPS / 1048576 )) MB/s on ${fails} consecutive probes -- tunnel up but not moving data"
+    rm -f "$THROUGHPUT_FAIL_FILE"
+    return 1
 }
 
 recent_auth_failure() {
