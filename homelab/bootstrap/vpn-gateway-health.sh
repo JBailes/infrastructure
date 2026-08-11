@@ -92,6 +92,19 @@ apply_firewall() {
     iptables -C FORWARD -i "$TUN" -o "$LAN_IFACE" -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
         iptables -A FORWARD -i "$TUN" -o "$LAN_IFACE" -m state --state ESTABLISHED,RELATED -j ACCEPT
 
+    # Clamp TCP MSS on traffic forwarded into the tunnel. Traffic the gateway
+    # originates does its own path-MTU discovery; traffic it FORWARDS cannot,
+    # so a client sending full-size segments has them encapsulated past the
+    # tunnel's usable MTU. --clamp-mss-to-pmtu measured erratic here, which
+    # says PMTU discovery is not reliable through this path, so a fixed value
+    # is used instead. 1300 is the conventional safe figure for OpenVPN; the
+    # measurements were too noisy to justify tuning it further.
+    iptables -t mangle -C FORWARD -o "$TUN" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1300 2>/dev/null || {
+        iptables -t mangle -D FORWARD -o "$TUN" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null
+        iptables -t mangle -A FORWARD -o "$TUN" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1300
+        log "re-added TCP MSS clamp (1300) on forwarded traffic"
+    }
+
     # LAN-to-LAN only. An unrestricted eth0->eth0 ACCEPT would let a client's
     # internet traffic route back out the home router unencrypted while the
     # tunnel is down -- exactly what the kill switch exists to prevent.
