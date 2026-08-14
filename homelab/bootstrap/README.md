@@ -61,6 +61,9 @@ Run each script directly on the Proxmox host, in order:
 ./11-setup-ollama.sh              # llama.cpp LLM inference (requires AMD GPU)
 ./12-setup-media-stack.sh         # Media automation (Prowlarr, Sonarr, Radarr, Lidarr, Readarr)
 
+# Phase 5: test host (runs on pvetest, a separate Proxmox host -- NOT this one)
+./16-setup-test-host-reaper.sh    # Hourly reaper for abandoned test environments
+
 # 03-setup-obs.sh automatically deploys Promtail to apt-cache, bittorrent,
 # the VPN gateway, nginx-proxy, and personal-web after obs is configured.
 #
@@ -603,3 +606,60 @@ Connection limits, the protocol setting and the rate limits are whatever is in
 the container's `qBittorrent.conf`. `02-setup-bittorrent.sh` writes that file
 only when it creates the container, so later changes made through the Web UI
 or the API are not captured here.
+---
+
+## 16 - Test Host Reaper (`pvetest`)
+
+The odd one out: it configures a **different Proxmox host** and creates no
+container. Run it on `pvetest` itself, as root.
+
+`pvetest` is a second Proxmox host, not a guest of this one, so there is no
+`pct list` entry to resolve it from -- it sits alongside the router and the NAS
+as one of the few things named by address rather than looked up. The script
+identifies it by hostname and refuses to install anywhere else (see Safety).
+
+`pvetest` is disposable infrastructure where agents build throwaway VMs and
+containers. Without a reaper those accumulate, and the next user inherits
+someone else's half-configured box. The script installs an hourly sweep that
+destroys abandoned environments, plus the host policy agents read.
+
+### Two clocks
+
+A VM or container is destroyed when **either** clock runs out:
+
+| Clock | Runs out after | Reset by |
+|-------|----------------|----------|
+| Liveness | 4h with no measurable activity | the guest actually doing work |
+| Lease | 4h since creation or last renewal | `aimee-keepalive` |
+
+"Measurable activity" is at least 10 MiB of combined disk read + disk write +
+net in + net out between two consecutive hourly samples; a stopped guest is
+never active. This is why a lease is not immortality: renewing satisfies the
+lease clock only, so a leased but idle environment is still reclaimed. Scratch
+under `/tmp`, `/var/tmp`, `/opt`, `/srv` and `/root` is swept on the same clock
+using mtime. Templates under `/var/lib/vz/template/` are never touched, since
+agents need them to build fresh environments.
+
+### Commands installed
+
+```bash
+aimee-keepalive vm:101          # renew a lease: full 4h from now, uncapped
+aimee-keepalive ct:200
+aimee-keepalive /tmp/my-build
+aimee-reap-status               # everything reapable, time left on both clocks
+```
+
+### Safety
+
+The script refuses to install on any host not named `pvetest` unless run with
+`FORCE=1`, because it installs a sweep that destroys every VM and CT it finds.
+Permanent fixtures go in `REAP_PROTECTED_VMIDS` in `/etc/aimee-reaper.conf`.
+Every action and renewal is logged to `/var/log/aimee-reaper.log`, and
+`aimee-reaper --dry-run` reports what a sweep would destroy without touching
+anything.
+
+### Usage
+
+```bash
+./16-setup-test-host-reaper.sh   # run on pvetest as root; idempotent
+```
