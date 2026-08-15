@@ -8,12 +8,12 @@
 #   ./07-setup-personal-web.sh --deploy-only  # Re-run configuration on existing CT
 #   ./07-setup-personal-web.sh --configure    # (internal) Run inside the container
 #
-# Creates a Debian 13 LXC (CT 106) single-homed on the LAN:
+# Creates a Debian 13 LXC single-homed on the LAN:
 #   eth0 on vmbr0
 #
 # Serves bailes.us as a static site via node serve on :3000.
-# nginx-proxy (CT 105) handles TLS termination and reaches this container by
-# name (personal-web.bailes.us), so renumbering it is a DNS change.
+# nginx-proxy handles TLS termination and reaches this container by name
+# (personal-web.bailes.us), so renumbering it is a DNS change.
 
 set -euo pipefail
 
@@ -24,9 +24,10 @@ _LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/nu
 # Container specification
 # ---------------------------------------------------------------------------
 
-CTID=106
+CTID="${PERSONAL_WEB_CTID:-106}"
 HOSTNAME="personal-web"
-LAN_IP="192.168.1.106"
+LAN_IP="192.168.1.${CTID}"
+# Matches production, which this script had drifted from.
 RAM=1024
 CORES=2
 DISK=4
@@ -88,7 +89,7 @@ personal-web is ready (CT $CTID).
 
 Net:  eth0 on vmbr0, resolvable as $HOSTNAME.$SEARCH_DOMAIN
 Site: bailes.us (static files via node serve on :3000)
-TLS:  handled by nginx-proxy (CT 105)
+TLS:  handled by nginx-proxy
 
 Firewall: :3000 from LAN (192.168.0.0/23), SSH from LAN
 ================================================================

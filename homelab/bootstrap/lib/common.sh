@@ -26,8 +26,17 @@ ACK_BRIDGE="vmbr2"
 # ---------------------------------------------------------------------------
 
 CTID_RANGE_START=100
-VPN_GATEWAY_VMID=104
-VPN_GATEWAY_IP="192.168.1.104"
+
+# Hosts are named, not numbered. Addresses are looked up from Proxmox at run
+# time via host_ip(), so renumbering a guest does not require editing scripts.
+# Writing addresses down here is what silently broke the bittorrent watchdog
+# and every cross-host reference when the containers were renumbered.
+VPN_GATEWAY_HOST="vpn-gateway"
+APT_CACHE_HOST="apt-cache"
+OBS_HOST="obs"
+DNS_HOST="dns"
+NAS_HOST="nas"
+
 CLOUD_IMAGE_FILENAME="debian-13-genericcloud-amd64.qcow2"
 CLOUD_IMAGE_URL="https://cloud.debian.org/images/cloud/trixie/latest/${CLOUD_IMAGE_FILENAME}"
 CLOUD_IMAGE_PATH="/mnt/pve/${IMAGE_STORAGE}/template/iso/${CLOUD_IMAGE_FILENAME}"
@@ -45,6 +54,57 @@ next_free_ctid() {
         ctid=$((ctid + 1))
     done
     echo "$ctid"
+}
+
+# The NAS is not a Proxmox guest, so its address cannot be derived. It and the
+# router are the only host addresses this repo still writes down.
+NAS_IP="${NAS_IP:-192.168.1.254}"
+
+# List every guest as "<id> <hostname>", containers and VMs alike.
+# Usage: guest_list
+guest_list() {
+    pct list 2>/dev/null | awk 'NR>1 {print $1, $3}'
+    qm list 2>/dev/null | awk 'NR>1 {print $1, $2}'
+}
+
+# Print a guest's static IPv4 address, or return 1 if it has none.
+# Returns nothing for DHCP or for guests with no network interface, so callers
+# can skip them instead of inventing an address.
+# Usage: guest_ip <id>
+guest_ip() {
+    local id="${1:?Usage: guest_ip <id>}"
+    local cfg ip
+    cfg=$(pct config "$id" 2>/dev/null || qm config "$id" 2>/dev/null) || return 1
+
+    # Matches both shapes pct/qm emit:
+    #   LXC: net0: name=eth0,...,ip=<addr>/<prefix>,...
+    #   VM:  ipconfig0: ip=<addr>/<prefix>,gw=<addr>
+    ip=$(grep -oP '(?<=\bip=)[0-9.]+(?=/)' <<<"$cfg" | head -1)
+    [[ -n "$ip" ]] || return 1
+    echo "$ip"
+}
+
+# Resolve a hostname to its address.
+#
+# Prefers Proxmox's own view of the guest, which is authoritative and works
+# before the resolver is up (and for the resolver itself). Falls back to DNS so
+# non-guest names like `nas` still resolve. Callers that need to hand a literal
+# address to a container should call this at deploy time rather than baking one
+# into the repo.
+# Usage: host_ip <hostname>
+host_ip() {
+    local name="${1:?Usage: host_ip <hostname>}"
+    local id ip
+
+    if id="$(resolve_ctid "$name" 2>/dev/null)"; then
+        if ip="$(guest_ip "$id" 2>/dev/null)"; then
+            echo "$ip"; return 0
+        fi
+    fi
+
+    ip=$(getent hosts "$name" 2>/dev/null | awk '{print $1; exit}')
+    [[ -n "$ip" ]] || return 1
+    echo "$ip"
 }
 
 # Resolve a hostname to its CTID by querying Proxmox

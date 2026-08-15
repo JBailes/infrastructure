@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# 03-setup-obs.sh -- Set up the observability stack on obs (quad-homed)
+# 03-setup-obs.sh -- Set up the observability stack on obs (dual-homed)
 #
-# Runs on: obs, Debian 13 LXC (quad-homed)
-#   eth0 = 192.168.1.100/23 on vmbr0 (Home LAN)
-#   eth1 = 10.0.0.100/20 on vmbr1 (WOL prod/shared)
-#   eth2 = 10.1.0.100/24 on vmbr2 (ACK private)
-#   eth3 = 10.0.1.100/24 on vmbr3 (WOL test)
-# CTID: 100 (static, homelab convention)
+# Runs on: obs, Debian 13 LXC (dual-homed)
+#   eth0 on vmbr0 (Home LAN)
+#   eth1 on vmbr2 (ACK private)
+#
+# The vmbr1/vmbr3 interfaces and every WOL scrape target were removed with the
+# WOL decommission; they were failing scrapes, not monitoring anything.
 #
 # Installs and configures:
 #   - Loki (log aggregation, :3100 on all interfaces)
@@ -16,7 +16,7 @@
 #   - Promtail (self-monitoring, ships obs own logs to Loki)
 #
 # Accepts log/metric ingestion from three networks:
-#   - WOL (10.0.0.0/20): mTLS with cfssl client certs (tenant: wol)
+#   - WOL: decommissioned; the wol tenant has no remaining sources
 #   - ACK (10.1.0.0/24): TLS (tenant: ack)
 #   - External (192.168.0.0/23): TLS + API key (tenant: proxmox, future external)
 #
@@ -36,18 +36,18 @@ _LIB="$(dirname "$0")/lib/common.sh"; [[ -f "$_LIB" ]] || _LIB="/root/lib/common
 # Container specification
 # ---------------------------------------------------------------------------
 
-CTID=100
+CTID="${OBS_CTID:-104}"
 HOSTNAME="obs"
-LAN_IP="192.168.1.100"
-WOL_IP="10.0.0.100"
+LAN_IP="192.168.1.${CTID}"
 ACK_IP="10.1.0.100"
-WOL_TEST_IP="10.0.1.100"
 RAM=2048
 CORES=2
 DISK=64
 PRIVILEGED="no"
 
-CA_IP="10.0.0.203"
+# The WOL intermediate CA is gone with the rest of WOL; Loki keeps its
+# self-signed cert.
+CA_IP=""
 CA_PORT="8443"
 OBS_ETC="/etc/obs"
 OBS_DATA="/var/lib/obs"
@@ -76,7 +76,9 @@ host_main() {
     pct start "$CTID" 2>/dev/null || true
     sleep 3
 
-    deploy_script "$CTID" "$0"
+    local _dns_addr
+    _dns_addr="$(host_ip "$DNS_HOST" 2>/dev/null || echo "$ROUTER_GW")"
+    deploy_script "$CTID" "$0" "DNS_ADDR=${_dns_addr}" "ROUTER_ADDR=${ROUTER_GW}"
 
     info "obs container ready (CTID $CTID)"
 
@@ -99,44 +101,23 @@ deploy_promtail_to_homelab() {
 
     info "Deploying Promtail to homelab LAN hosts"
 
-    # apt-cache (CT 115)
-    if pct status 115 &>/dev/null; then
-        info "Deploying Promtail to apt-cache (CT 115)"
-        deploy_script 115 "$promtail_script"
-    else
-        echo "WARN: apt-cache (CT 115) not running, skipping" >&2
-    fi
+    # Resolve each host by name. These were pinned to CT 115/116/117/118,
+    # which after the renumber point at entirely different containers.
+    for _host in apt-cache bittorrent nginx-proxy personal-web rakuen-web; do
+        if _ctid=$(resolve_ctid "$_host" 2>/dev/null) && pct status "$_ctid" &>/dev/null; then
+            info "Deploying Promtail to $_host (CT $_ctid)"
+            deploy_script "$_ctid" "$promtail_script"
+        else
+            echo "WARN: $_host not found or not running, skipping" >&2
+        fi
+    done
 
-    # bittorrent (CT 116)
-    if pct status 116 &>/dev/null; then
-        info "Deploying Promtail to bittorrent (CT 116)"
-        deploy_script 116 "$promtail_script"
+    # VPN gateway (a VM, so deployed over SSH rather than pct)
+    if gw_addr=$(host_ip "$VPN_GATEWAY_HOST" 2>/dev/null); then
+        info "Deploying Promtail to $VPN_GATEWAY_HOST ($gw_addr)"
+        deploy_script_vm "$gw_addr" "$promtail_script"
     else
-        echo "WARN: bittorrent (CT 116) not running, skipping" >&2
-    fi
-
-    # vpn-gateway (VM 104, deploy via SSH)
-    if qm status 104 &>/dev/null; then
-        info "Deploying Promtail to vpn-gateway (VM 104)"
-        deploy_script_vm "192.168.1.104" "$promtail_script"
-    else
-        echo "WARN: vpn-gateway (VM 104) not running, skipping" >&2
-    fi
-
-    # nginx-proxy (CT 118)
-    if pct status 118 &>/dev/null; then
-        info "Deploying Promtail to nginx-proxy (CT 118)"
-        deploy_script 118 "$promtail_script"
-    else
-        echo "WARN: nginx-proxy (CT 118) not running, skipping" >&2
-    fi
-
-    # personal-web (CT 117)
-    if pct status 117 &>/dev/null; then
-        info "Deploying Promtail to personal-web (CT 117)"
-        deploy_script 117 "$promtail_script"
-    else
-        echo "WARN: personal-web (CT 117) not running, skipping" >&2
+        echo "WARN: could not resolve $VPN_GATEWAY_HOST, skipping" >&2
     fi
 
     info "Promtail deployment to homelab LAN hosts complete"
@@ -212,12 +193,6 @@ prechecks() {
     else
         echo "NOTE: CA not reachable at $CA_IP:$CA_PORT (expected if WOL is not yet bootstrapped)" >&2
         echo "      Loki will start with a self-signed cert. Enroll a CA cert later." >&2
-    fi
-    # Gateway is optional (obs may be deployed before WOL gateways)
-    if ping -c1 -W2 10.0.0.200 &>/dev/null; then
-        info "Gateway reachable"
-    else
-        echo "NOTE: Gateway not reachable (expected if WOL is not yet bootstrapped)" >&2
     fi
     info "Prechecks passed"
 }
@@ -422,57 +397,11 @@ alerting:
         - targets: ['localhost:9093']
 
 scrape_configs:
-  # WOL internal services (plain HTTP on private network, mTLS deferred to SPIRE rollout)
-  - job_name: wol
-    scheme: http
-    # Only services with prometheus-net /metrics endpoint.
-    # wol-web, wol-realm, spire-server use blackbox /health probes.
-    # wol-a and wol-ai will be added when they expose /metrics.
-    static_configs:
-      - targets: ['10.0.0.207:8443']
-        labels:
-          name: wol-accounts
-      - targets: ['10.0.0.211:8443']
-        labels:
-          name: wol-world-prod
-      - targets: ['10.0.1.216:8443']
-        labels:
-          name: wol-world-test
-    metrics_path: /metrics
-    sample_limit: 5000
-
-  # Database hosts (postgres_exporter, plain HTTP on private network)
-  - job_name: postgres
-    scheme: http
-    static_configs:
-      - targets: ['10.0.0.202:9187']
-        labels:
-          name: spire-db
-      - targets: ['10.0.0.206:9187']
-        labels:
-          name: wol-accounts-db
-      - targets: ['10.0.0.213:9187']
-        labels:
-          name: wol-world-db-prod
-      - targets: ['10.0.0.214:9187']
-        labels:
-          name: wol-realm-db-prod
-      - targets: ['10.0.1.218:9187']
-        labels:
-          name: wol-world-db-test
-      - targets: ['10.0.1.219:9187']
-        labels:
-          name: wol-realm-db-test
-    sample_limit: 5000
-
-  # SPIRE Server removed from direct scrape (gRPC on :8081, no /metrics endpoint).
-  # Monitored via blackbox HTTP probe on :8080/ready instead (see 08-setup-dashboards.sh).
-
   # ACK hosts (plaintext, isolated network)
   - job_name: ack
     scheme: http
     static_configs:
-      - targets: ['10.1.0.246:9187']
+      - targets: ['ack-db:9187']
         labels:
           name: ack-db
     relabel_configs:
@@ -987,49 +916,42 @@ SYSCTL
 }
 
 configure_gateway_route() {
-    # obs is on the LAN (eth0, default route via 192.168.1.1 from LXC creation).
-    # ECMP route through WOL gateways is added only if they are reachable,
-    # for WOL-network connectivity. If gateways are not up yet (obs deployed
-    # before WOL), the LAN default route is sufficient for internet/apt.
-    if ping -c1 -W2 10.0.0.200 &>/dev/null; then
-        ip route del default 2>/dev/null || true
-        ip route add default nexthop via 10.0.0.200 nexthop via 10.0.0.201
-        info "ECMP default route set via WOL gateways"
-    else
-        info "WOL gateways not reachable, keeping LAN default route (192.168.1.1)"
-    fi
+    # obs sits on the LAN with its default route via the home router, set at
+    # container creation. This used to add an ECMP route through the WOL
+    # gateways; those are decommissioned, so there is nothing to add.
+    info "Using LAN default route"
 }
 
 configure_dns_ntp() {
-    # Use WOL gateways for DNS/NTP if reachable, otherwise use the home router.
-    if ping -c1 -W2 10.0.0.200 &>/dev/null; then
-        cat > /etc/resolv.conf <<RESOLV
-nameserver 10.0.0.200
-nameserver 10.0.0.201
+    # The WOL gateways used to serve DNS and NTP. They are gone; the LAN
+    # resolver (CT `dns`) handles names, with the router as a fallback.
+    # Passed in by host_main: this function runs inside the container, where
+    # pct/qm are unavailable, so it cannot resolve anything itself.
+    local dns_addr router
+    router="${ROUTER_ADDR:-192.168.1.1}"
+    dns_addr="${DNS_ADDR:-$router}"
+
+    cat > /etc/resolv.conf <<RESOLV
+search ${DNS_ZONE:-bailes.us}
+nameserver ${dns_addr}
+nameserver ${router}
 RESOLV
-        info "DNS set to WOL gateways"
-    else
-        cat > /etc/resolv.conf <<RESOLV
-nameserver 192.168.1.1
-RESOLV
-        info "DNS set to home router (WOL gateways not yet reachable)"
-    fi
+    info "DNS set to ${dns_addr} (fallback ${router})"
+
     if command -v chronyc &>/dev/null; then
         cat > /etc/chrony/chrony.conf <<CHRONY
-server 10.0.0.200 iburst prefer
-server 10.0.0.201 iburst prefer
-server 192.168.1.1 iburst
+server ${router} iburst
 driftfile /var/lib/chrony/drift
 makestep 1.0 3
 rtcsync
 CHRONY
         systemctl restart chrony 2>/dev/null || true
-        info "NTP configured (WOL gateways preferred, home router fallback)"
+        info "NTP configured against ${router}"
     fi
 }
 
 configure_firewall() {
-    info "Configuring firewall (quad-homed, iptables)"
+    info "Configuring firewall (dual-homed, iptables)"
 
     # Flush existing rules
     iptables -F INPUT 2>/dev/null || true
@@ -1045,19 +967,9 @@ configure_firewall() {
     iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
     iptables -A INPUT -i lo -j ACCEPT
 
-    # WOL interface (eth1, 10.0.0.0/20): SSH, Loki (mTLS), Prometheus
-    iptables -A INPUT -s 10.0.0.0/20 -p tcp --dport 22 -j ACCEPT
-    iptables -A INPUT -s 10.0.0.0/20 -p tcp --dport 3100 -j ACCEPT
-    iptables -A INPUT -s 10.0.0.0/20 -p tcp --dport 9090 -j ACCEPT
-
     # ACK interface (eth2, 10.1.0.0/24): Loki (TLS), Prometheus
     iptables -A INPUT -s 10.1.0.0/24 -p tcp --dport 3100 -j ACCEPT
     iptables -A INPUT -s 10.1.0.0/24 -p tcp --dport 9090 -j ACCEPT
-
-    # WOL test interface (eth3, 10.0.1.0/24): SSH, Loki (mTLS), Prometheus
-    iptables -A INPUT -s 10.0.1.0/24 -p tcp --dport 22 -j ACCEPT
-    iptables -A INPUT -s 10.0.1.0/24 -p tcp --dport 3100 -j ACCEPT
-    iptables -A INPUT -s 10.0.1.0/24 -p tcp --dport 9090 -j ACCEPT
 
     # LAN interface (eth0, 192.168.0.0/23): Grafana (80 redirected to 3000), Loki, Prometheus
     iptables -A INPUT -s 192.168.0.0/23 -p tcp --dport 80 -j ACCEPT

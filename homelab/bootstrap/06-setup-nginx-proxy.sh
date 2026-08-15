@@ -8,25 +8,28 @@
 #   ./06-setup-nginx-proxy.sh --deploy-only  # Re-run configuration on existing CT
 #   ./06-setup-nginx-proxy.sh --configure    # (internal) Run inside the container
 #
-# Creates a Debian 13 LXC (CT 105) dual-homed:
+# Creates a Debian 13 LXC dual-homed:
 #   eth0 on vmbr0 (LAN, incoming HTTPS from router)
 #   eth1 on vmbr2 (ACK, reach ack-web)
 #
+# The vmbr1 (WOL) interface was removed with the WOL decommission.
+#
 # Central nginx reverse proxy for all web sites. Handles TLS termination
 # via certbot and routes by Host header to the appropriate backend:
-#   ackmud.com      -> ack-web on the ACK bridge + stream for WSS ports
+#   ackmud.com      -> ack-web (ack-web:5000) + stream for WSS ports
 #   aha.ackmud.com  -> redirect to ackmud.com
-#   bailes.us       -> personal-web (CT 106) :3000
-#   rakuensoftware.com -> rakuen-web (CT 107) :3000
+#   bailes.us       -> personal-web (personal-web:3000)
+#   rakuensoftware.com -> rakuen-web (rakuen-web:3000)
 #   rakuensoft.com  -> redirect to rakuensoftware.com
 #
-# Backends are addressed by DNS name, not by address. The dns container (CT 101)
-# serves the bailes.us zone and PVE hands every container that resolver, so a
-# container can be renumbered without editing this file. Addresses appear below
-# only where something must be allocated or where the value cannot be a name:
-# this container's own interfaces, firewall source ranges, and ack-web -- which
-# sits on the ACK bridge and has no DNS record. The resolver's own address is the
-# other unavoidable one ($DNS_IP below): it is what makes names resolvable, so it
+# Backends are addressed by DNS name, not by address. The dns container serves
+# the bailes.us zone from live Proxmox state (15-setup-dns.sh) and PVE hands
+# every container that resolver, so a container can be renumbered without
+# editing this file -- ack-web included, which this script used to reach by
+# address because it had no record. Addresses appear below only where something
+# must be allocated or where the value cannot be a name: this container's own
+# interfaces and firewall source ranges. The resolver's own address is the other
+# unavoidable one ($DNS_IP below): it is what makes names resolvable, so it
 # cannot itself be a name.
 
 set -euo pipefail
@@ -38,9 +41,9 @@ _LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/nu
 # Container specification
 # ---------------------------------------------------------------------------
 
-CTID=105
+CTID="${NGINX_PROXY_CTID:-105}"
 HOSTNAME="nginx-proxy"
-LAN_IP="192.168.1.105"
+LAN_IP="192.168.1.${CTID}"
 ACK_IP="10.1.0.118"
 RAM=512
 CORES=1
@@ -59,8 +62,10 @@ SEARCH_DOMAIN="bailes.us"
 PERSONAL_WEB="personal-web.bailes.us"
 RAKUEN_WEB="rakuen-web.bailes.us"
 
-# ack-web is on the ACK bridge, which the bailes.us zone does not cover.
-ACK_WEB="10.1.0.247"
+# ack-web sits on the ACK bridge. It used to be named here by address because it
+# had no record; 15-setup-dns.sh now builds the zone from live Proxmox state, so
+# it has one and this is a name like the rest.
+ACK_WEB="ack-web"
 
 err()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
@@ -411,7 +416,6 @@ configure_firewall() {
 
     # .NET caching proxy from all local networks
     iptables -A INPUT -s 192.168.0.0/23 -p tcp --dport 8080 -j ACCEPT
-    iptables -A INPUT -s 10.0.0.0/20 -p tcp --dport 8080 -j ACCEPT
     iptables -A INPUT -s 10.1.0.0/24 -p tcp --dport 8080 -j ACCEPT
 
     # Legacy MUD WSS ports from anywhere

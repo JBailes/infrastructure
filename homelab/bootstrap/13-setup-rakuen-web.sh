@@ -8,12 +8,12 @@
 #   ./13-setup-rakuen-web.sh --deploy-only  # Re-run configuration on existing CT
 #   ./13-setup-rakuen-web.sh --configure    # (internal) Run inside the container
 #
-# Creates a Debian 13 LXC (CT 107) single-homed on the LAN:
+# Creates a Debian 13 LXC single-homed on the LAN:
 #   eth0 on vmbr0
 #
 # Serves rakuensoftware.com as a static site via node serve on :3000.
-# nginx-proxy (CT 105) handles TLS termination and reaches this container by
-# name (rakuen-web.bailes.us), so renumbering it is a DNS change.
+# nginx-proxy handles TLS termination and reaches this container by name
+# (rakuen-web.bailes.us), so renumbering it is a DNS change.
 #
 # The site (RakuenSoftware/rakuensoftware-web) is a Vite + React SPA. It is
 # built in-container, so unknown paths must be rewritten to index.html --
@@ -28,12 +28,12 @@ _LIB="${SCRIPT_DIR}/lib/common.sh"; [[ -f "$_LIB" ]] && source "$_LIB" 2>/dev/nu
 # Container specification
 # ---------------------------------------------------------------------------
 
-CTID=107
+CTID="${RAKUEN_WEB_CTID:-107}"
 HOSTNAME="rakuen-web"
-LAN_IP="192.168.1.107"
-# The disk is larger than the other static sites because this one runs
-# `npm install` and a Vite production build inside the container. It OOMs below
-# 1GB; the running footprint afterwards is still just `serve`.
+LAN_IP="192.168.1.${CTID}"
+# Deliberately roomier than a plain static site: this one runs `npm install`
+# and a Vite production build inside the container, which OOMs below 1GB. The
+# running footprint afterwards is still just `serve`.
 RAM=1024
 CORES=2
 DISK=8
@@ -94,7 +94,7 @@ rakuen-web is ready (CT $CTID).
 
 Net:  eth0 on vmbr0, resolvable as $HOSTNAME.$SEARCH_DOMAIN
 Site: rakuensoftware.com (static files via node serve on :3000)
-TLS:  handled by nginx-proxy (CT 105)
+TLS:  handled by nginx-proxy
 
 Firewall: :3000 from LAN (192.168.0.0/23), SSH from LAN
 ================================================================

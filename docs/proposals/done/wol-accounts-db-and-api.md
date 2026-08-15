@@ -1,5 +1,16 @@
 # Proposal: WOL Accounts Database and API Server
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+>
+> The WOL network described here has since been decommissioned.
+
+
 **Status:** Pending
 **Date:** 2026-03-24
 **Affects:** `wol/`, new `wol-accounts` repo (API + DB), PostgreSQL, `CLAUDE.md`

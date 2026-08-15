@@ -1,5 +1,14 @@
 # Overall Architecture README
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+
+
 ## Problem
 
 wol-docs has detailed READMEs and diagrams in each subdirectory (wol/, homelab/, homelab/ack/) but no single document that shows how the three networks relate to each other, what the Proxmox host looks like as a whole, and how shared services (apt-cache, gateways) bridge across networks.

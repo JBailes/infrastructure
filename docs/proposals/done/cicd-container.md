@@ -1,5 +1,16 @@
 # CI/CD Container
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+>
+> The WOL network described here has since been decommissioned.
+
+
 ## Problem
 
 Builds currently run on the Proxmox host via `pve-build-services.sh`, which requires SSH access to the hypervisor and leaves the .NET SDK installed there. There is no way for GitHub Actions (or equivalent) to trigger deployments, and no isolation between build and host management. ACK services have no automated deploy path at all.
@@ -18,7 +29,7 @@ Create a dedicated CI/CD container (LXC) that is quad-homed on all four network 
 | RAM | 2048 MB |
 | Cores | 2 |
 | Disk | 32 GB |
-| eth0 | vmbr0, 192.168.1.119/23 (LAN, SSH ingress from GitHub runner) |
+| eth0 | vmbr0, `media-stack` (not deployed) (LAN, SSH ingress from GitHub runner) |
 | eth1 | vmbr1, 10.0.0.119/24 (WOL prod/shared) |
 | eth2 | vmbr2, 10.1.0.119/24 (ACK) |
 | eth3 | vmbr3, 10.0.1.119/24 (WOL test) |

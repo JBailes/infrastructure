@@ -1,8 +1,17 @@
-# Migrate CT 103 from Ollama to llama.cpp (Vulkan)
+# Migrate CT 140 `tierA-5080` from Ollama to llama.cpp (Vulkan)
+
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+
 
 ## Problem
 
-CT 103 runs Ollama with AMD 7900XTX GPU passthrough for local LLM inference.
+CT 140 `tierA-5080` runs Ollama with AMD 7900XTX GPU passthrough for local LLM inference.
 Benchmarking revealed that Ollama's bundled ROCm backend significantly
 underperforms on this hardware -- decode throughput is only 28 tok/s on a
 27B Q4_K_M model, roughly 46% of the card's theoretical memory-bandwidth
@@ -12,7 +21,7 @@ ceiling (~60 tok/s).
 
 **Model:** Qwen3.5-27B Q4_K_M (15.58 GiB)
 **Hardware:** AMD Radeon RX 7900 XTX (24 GB VRAM, 960 GB/s bandwidth)
-**Container:** CT 103 (Proxmox LXC, privileged, GPU passthrough)
+**Container:** CT 140 `tierA-5080` (Proxmox LXC, privileged, GPU passthrough)
 
 | Engine | Backend | Prompt (tok/s) | Decode (tok/s) | % of theoretical |
 |--------|---------|---------------:|---------------:|-----------------:|
@@ -58,7 +67,7 @@ Replace Ollama with llama.cpp's `llama-server` using the Vulkan backend.
 | Property | Value |
 |----------|-------|
 | CTID | 103 |
-| IP | 192.168.1.103 |
+| Host | CT 140 `tierA-5080` |
 | RAM | 64 GB |
 | Disk | 256 GB |
 | CPU | 8 cores |

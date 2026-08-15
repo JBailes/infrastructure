@@ -1,5 +1,19 @@
 # Identity and Auth Contract
 
+> ## Decommissioned
+>
+> The WOL (World of Legends) infrastructure no longer exists. All 19 guests
+> (18 LXC + 1 VM) have been removed from the Proxmox host. The `vmbr1`
+> (10.0.0.0/24) and `vmbr3` (10.0.1.0/24) bridges are still configured but have
+> `bridge-ports none` and carry no guests.
+>
+> This document is retained as a **design record only**. It does not describe
+> running infrastructure, and the hostnames and addresses in it are historical
+> -- they are kept because removing them would gut the record. Do not use this
+> document to reason about the current environment; see
+> [architecture.md](../architecture.md) for what actually runs.
+
+
 Normative reference for SPIFFE identity, JWT-SVID authentication, and authorization across all WOL services.
 
 ## SPIFFE ID Convention

@@ -1,5 +1,14 @@
 # Proposal: ACK!FUSS 4.4.1 MUD Server
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+
+
 ## Status
 Approved.
 
@@ -21,7 +30,7 @@ Add ACK!FUSS as the 6th MUD server on the ACK network.
 |-------|-------|
 | Hostname | ackfuss |
 | CTID | 250 |
-| IP | 10.1.0.250 |
+| Host | CT 250 `ackfuss` |
 | Bridge | vmbr2 |
 | Disk | 4 GB |
 | RAM | 256 MB |
@@ -29,7 +38,7 @@ Add ACK!FUSS as the 6th MUD server on the ACK network.
 
 ### Gateway
 
-External port 8895 on ack-gateway (192.168.1.240) forwards to 10.1.0.250:4000.
+External port 8895 on ack-gateway (CT 240 `ack-gateway`) forwards to CT 250 `ackfuss`:4000.
 Add dnsmasq host entry for ackfuss.
 
 ### Build Dependencies

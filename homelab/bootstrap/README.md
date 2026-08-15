@@ -4,33 +4,68 @@ Each script is self-contained: run it on the Proxmox host and it creates the
 LXC container (or VM), then pushes and executes itself inside to configure it.
 Scripts are idempotent: they skip container creation if it already exists.
 
+## Hosts are named, not numbered
+
+Nothing here writes down another host's address. Cross-host references use
+**hostnames**, resolved by the local DNS server (CT `dns`, see step 15). The
+only addresses left in this directory are the router, the NAS, and subnet
+CIDRs -- none of which are Proxmox guests whose address could be looked up.
+
+This is not cosmetic. Every host was renumbered at some point, and every
+written-down address went stale silently, because nothing checks a comment.
+The bittorrent watchdog kept comparing the live default route against a
+gateway address that had moved, and stopped qBittorrent on every run for
+six days before anyone noticed.
+
+Three rules follow from that:
+
+- **Cross-host references use names.** `obs:3100`, `apt-cache:3142`,
+  `nas:/mnt/data/...`. These resolve through CT `dns`.
+- **Where a literal address is genuinely required**, resolve it at run time
+  with `host_ip <hostname>` from `lib/common.sh` and pass it in. iptables
+  source matches, and the bittorrent watchdog's comparison against
+  `ip route` output, both need an address and must not depend on DNS.
+- **CTIDs are resolved, not pinned.** Scripts call `resolve_ctid <hostname>`
+  and fall back to `next_free_ctid` when creating. Pinning a CTID is what
+  would make a re-run create a duplicate container after a renumber.
+
+`lib/common.sh` provides `host_ip`, `resolve_ctid`, `guest_ip`, and
+`guest_list`; all of them read live Proxmox state.
+
 ## Usage
 
 Run each script directly on the Proxmox host, in order:
 
 ```bash
 # Phase 1: shared services (run in order)
-./00-setup-apt-cache.sh           # CT 115, package cache for all networks
-./01-setup-vpn-gateway.sh         # VM 104, OpenVPN gateway
-./02-setup-bittorrent.sh          # CT 116, qBittorrent-nox (needs vpn-gateway)
-./03-setup-obs.sh                 # CT 100, observability stack (Loki, Prometheus, Grafana)
+./00-setup-apt-cache.sh           # apt-cache, package cache for all networks
+./01-setup-vpn-gateway.sh         # vpn-gateway VM, OpenVPN gateway
+./02-setup-bittorrent.sh          # bittorrent, qBittorrent-nox (needs the VPN gateway)
+./03-setup-obs.sh                 # obs, observability stack (Loki, Prometheus, Grafana)
 
 # Phase 2: web infrastructure
-./06-setup-nginx-proxy.sh         # CT 118, nginx reverse proxy (tri-homed)
-./07-setup-personal-web.sh        # CT 117, personal website (bailes.us)
-./13-setup-rakuen-web.sh          # CT 121, Rakuen Software site (rakuensoftware.com)
+./06-setup-nginx-proxy.sh         # nginx-proxy, reverse proxy (multi-homed)
+./07-setup-personal-web.sh        # personal-web, personal website (bailes.us)
+./13-setup-rakuen-web.sh          # rakuen-web, Rakuen Software site (rakuensoftware.com)
+
+# Phase 2b: name resolution and VPN self-healing
+./15-setup-dns.sh                 # sync the local DNS zone from live Proxmox state
+./14-setup-vpn-gateway-health.sh  # self-healing health check on the VPN gateway
 
 # Phase 3: dashboards and host observability
 ./08-setup-dashboards.sh          # Grafana dashboards + blackbox_exporter on obs
-./09-setup-proxmox-obs.sh        # pve-exporter + Promtail on the Proxmox host
+./09-setup-proxmox-obs.sh         # pve-exporter + Promtail on the Proxmox host
 
 # Phase 4: optional services
 ./10-setup-wolf.sh                # Wolf cloud gaming + Wolf Den (requires GPU)
 ./11-setup-ollama.sh              # llama.cpp LLM inference (requires AMD GPU)
 ./12-setup-media-stack.sh         # Media automation (Prowlarr, Sonarr, Radarr, Lidarr, Readarr)
 
+# Phase 5: test host (runs on pvetest, a separate Proxmox host -- NOT this one)
+./16-setup-test-host-reaper.sh    # Hourly reaper for abandoned test environments
+
 # 03-setup-obs.sh automatically deploys Promtail to apt-cache, bittorrent,
-# vpn-gateway, nginx-proxy, and personal-web after obs is configured.
+# the VPN gateway, nginx-proxy, and personal-web after obs is configured.
 #
 # ACK Promtail is deployed by the ACK orchestrator (pve-setup-ack.sh) or
 # manually per-host with ack/bootstrap/02-setup-promtail.sh.
@@ -39,43 +74,29 @@ Run each script directly on the Proxmox host, in order:
 ./00-setup-apt-cache.sh --deploy-only
 ```
 
-All CTIDs are static. IPs follow the convention `X.X.X.{CTID}` on each network.
-
-| Hostname | CTID | IP |
-|----------|------|----|
-| obs | 100 | 192.168.1.100 (LAN), 10.0.0.100 (WOL), 10.1.0.100 (ACK) |
-| vpn-gateway | 104 | 192.168.1.104 |
-| apt-cache | 115 | 192.168.1.115 (LAN), 10.0.0.115 (WOL), 10.1.0.115 (ACK) |
-| bittorrent | 116 | 192.168.1.116 |
-| dns | 101 | 192.168.1.101 |
-| personal-web | 106 | 192.168.1.106 |
-| rakuen-web | 107 | 192.168.1.107 |
-| nginx-proxy | 105 | 192.168.1.105 (LAN), 10.1.0.118 (ACK) |
-| media-stack | 119 | 192.168.1.119 |
-| qwen103 | 103 | 192.168.1.103 |
-
 ---
 
-## 00 - Apt Cache (CTID 115, 192.168.1.115 / 10.0.0.115 / 10.1.0.115)
+## 00 - Apt Cache (`apt-cache`)
 
-Tri-homed LXC container running apt-cacher-ng. Caches .deb packages for all
-homelab, WOL, and ACK hosts. First download fetches from public mirrors; subsequent
+Multi-homed LXC container running apt-cacher-ng. Caches .deb packages for
+homelab and ACK hosts. First download fetches from public mirrors; subsequent
 requests are served from cache.
 
-- **eth0**: 192.168.1.115 on vmbr0 (home LAN, fetches packages)
-- **eth1**: 10.0.0.115/20 on vmbr1 (WOL private network, serves cache)
-- **eth2**: 10.1.0.115/24 on vmbr2 (ACK private network, serves cache)
+- **eth0**: vmbr0 (home LAN, fetches packages)
+- **eth1**: vmbr2 (ACK private network, serves cache)
 - **Port**: 3142 (apt-cacher-ng)
 
-The WOL orchestrator auto-configures apt proxy on WOL hosts if apt-cache is reachable.
-Homelab and ACK scripts configure it individually.
+Homelab and ACK scripts configure the apt proxy individually.
+
+> The WOL interfaces on `vmbr1`/`vmbr3` were removed from this script along
+> with the resolver entries pointing at the WOL gateways.
 
 ---
 
-## 01 - VPN Gateway (VMID 104, 192.168.1.104)
+## 01 - VPN Gateway (`vpn-gateway` VM; running as VM 111 `smoothrouter`)
 
 Cloud-init VM that acts as a network gateway. Any device that sets its default
-gateway and DNS to 192.168.1.104 has all traffic routed through a VPN tunnel.
+gateway and DNS to the VPN gateway has all traffic routed through a VPN tunnel.
 If the tunnel drops, a kill switch blocks all forwarded traffic until it
 reconnects. Traffic is never sent unencrypted.
 
@@ -99,36 +120,42 @@ the NordVPN dashboard under manual setup.
 
 ### Using the gateway
 
-On any LAN device, change:
-
-- **Default gateway**: `192.168.1.1` -> `192.168.1.104`
-- **DNS server**: -> `192.168.1.104`
-
-To stop using VPN, change both back to `192.168.1.1`.
+On any LAN device, set both the default gateway and the DNS server to the VPN
+gateway. To stop using the VPN, set both back to the home router.
 
 ---
 
-## 02 - BitTorrent (CTID 116, 192.168.1.116)
+## 02 - BitTorrent (`bittorrent`)
 
 LXC container running qBittorrent-nox with three layers of VPN enforcement.
-Downloads are stored on the NAS at `//192.168.1.254/storage/bittorrent`.
+Downloads are stored on `nas` over NFS.
 
 ### Prerequisites
 
-- VPN gateway (VMID 104, 192.168.1.104) must be running
-- NAS share `//192.168.1.254/storage/bittorrent` must be accessible via guest access
+- The VPN gateway VM must be running
+- The NAS bittorrent export must be accessible
 
 ### VPN enforcement (three layers)
 
-1. **VPN gateway kill switch**: the default gateway (192.168.1.104) drops all
-   forwarded traffic if its VPN tunnel is down
-2. **Local iptables kill switch**: OUTPUT policy is DROP, only allows traffic
-   to the VPN gateway and the NAS (port 445). The container cannot send
-   internet-bound traffic anywhere except through the VPN gateway, even if
-   the default route is changed.
-3. **Watchdog**: checks the default route and gateway reachability every 60
-   seconds. Stops qBittorrent immediately if anything is wrong. Restarts it
-   when conditions are restored.
+1. **VPN gateway kill switch**: the default gateway drops all forwarded traffic
+   if its VPN tunnel is down
+2. **Local iptables kill switch**: OUTPUT policy is DROP, blocking the home
+   router directly so the container cannot send internet-bound traffic anywhere
+   except through the VPN gateway, even if the default route is changed.
+3. **Watchdog**: checks the default route, gateway reachability, and real
+   egress every 60 seconds. Stops qBittorrent if anything is wrong, and
+   restarts it when conditions are restored.
+
+The watchdog reads its expected gateway from `/etc/vpn-watchdog.conf`, written
+at deploy time from `host_ip vpn-gateway`, and fails loudly if that value is
+missing rather than guessing. It previously carried the address inline, which
+is why it silently stopped qBittorrent on every run once the gateway moved.
+
+The route and ping checks both still pass while the gateway's *tunnel* is
+dead -- the route is correct and the gateway answers. That is false assurance,
+so the watchdog also probes real egress and stops qBittorrent after three
+consecutive failures. The gateway's kill switch means a dead tunnel blocks
+rather than leaks, so a sustained egress failure is the tunnel being down.
 
 ### Storage
 
@@ -137,27 +164,24 @@ Downloads are stored on the NAS at `//192.168.1.254/storage/bittorrent`.
 | `/mnt/torrents/complete/` | Completed downloads |
 | `/mnt/torrents/incomplete/` | In-progress downloads |
 
-Both map to subdirectories of `192.168.1.254:/mnt/data/storage/bittorrent` via NFS
-mount.
+Both map to subdirectories of the NAS bittorrent export via NFS mount.
 
 ### Web UI
 
-`http://192.168.1.116` from any device on the LAN.
+Port 80 (redirected to :8080) on the `bittorrent` container, from any device on the LAN.
 
 ---
 
-## 03 - Observability (CTID 100, 192.168.1.100 / 10.0.0.100 / 10.1.0.100)
+## 03 - Observability (`obs`)
 
-Tri-homed LXC container running the centralized observability stack. Collects
-logs and metrics from all three networks.
+Multi-homed LXC container running the centralized observability stack.
 
-- **eth0**: 192.168.1.100 on vmbr0 (Grafana :80, LAN/Proxmox log ingestion)
-- **eth1**: 10.0.0.100/20 on vmbr1 (WOL Promtail mTLS ingestion, Prometheus scrape)
-- **eth2**: 10.1.0.100/24 on vmbr2 (ACK Promtail TLS ingestion)
+- **eth0**: vmbr0 (Grafana :80, LAN/Proxmox log ingestion)
+- **eth1**: vmbr2 (ACK Promtail TLS ingestion)
 
 | Component | Port | Purpose |
 |-----------|------|---------|
-| Loki | 3100 | Log aggregation (all three interfaces) |
+| Loki | 3100 | Log aggregation |
 | Prometheus | 9090 | Metrics scraping |
 | Alertmanager | 9093 | Alert routing (localhost only) |
 | Grafana | 3000 | Dashboards (LAN interface only) |
@@ -166,20 +190,24 @@ logs and metrics from all three networks.
 
 | Tenant | Sources | Auth |
 |--------|---------|------|
-| `wol` | WOL service hosts | mTLS (cfssl CA client certs) |
 | `ack` | ACK MUD servers | TLS |
-| `homelab` | apt-cache, vpn-gateway, bittorrent, nginx-proxy, personal-web, rakuen-web | TLS |
+| `homelab` | apt-cache, VPN gateway, bittorrent, nginx-proxy, personal-web, rakuen-web | TLS |
 | `proxmox` | Proxmox host | TLS + API key |
 
-Must be deployed before WOL Promtail steps (step 18 in the WOL bootstrap) and
-before ACK or LAN Promtail deployment.
+Must be deployed before ACK or LAN Promtail deployment.
+
+> The `wol` Loki tenant is retained (harmless, and old logs still carry it),
+> but every WOL Prometheus scrape target has been removed -- they were failing
+> scrapes, not monitoring anything. The ECMP route, DNS and NTP settings that
+> pointed at the WOL gateways are gone too.
 
 ---
 
 ## 04 - Promtail ACK (deployed to ACK hosts)
 
-Installs Promtail on ACK MUD servers. Pushes logs to Loki at 10.1.0.100:3100
-with `tenant_id: ack` over TLS. Run on each ACK host after obs is up.
+Installs Promtail on ACK MUD servers. Pushes logs to Loki on `obs` (ACK
+interface, :3100) with `tenant_id: ack` over TLS. Run on each ACK host after
+obs is up.
 
 Not run from the Proxmox host directly; deployed via `pct push`/`pct exec` or
 by the ACK orchestrator (`pve-setup-ack.sh`).
@@ -188,69 +216,67 @@ by the ACK orchestrator (`pve-setup-ack.sh`).
 
 ## 05 - Promtail LAN (deployed to homelab LAN hosts)
 
-Installs Promtail on LAN homelab hosts (apt-cache, vpn-gateway, bittorrent).
-Pushes logs to Loki at 192.168.1.100:3100 with `tenant_id: homelab` over TLS.
+Installs Promtail on LAN homelab hosts (apt-cache, VPN gateway, bittorrent).
+Pushes logs to Loki on `obs` (LAN interface, :3100) with `tenant_id: homelab`
+over TLS.
 
 Run on each LAN host after obs is up. Deploy via `pct push`/`pct exec` for
-LXC containers, or via `scp`/`ssh` for the vpn-gateway VM.
+LXC containers, or via `scp`/`ssh` for the VPN gateway VM.
 
 ---
 
-## 06 - Nginx Proxy (CTID 105)
+## 06 - Nginx Proxy (`nginx-proxy`)
 
-Dual-homed LXC container running nginx as a central reverse proxy for all web
+Multi-homed LXC container running nginx as a central reverse proxy for all web
 sites. Handles TLS termination via certbot and routes by Host header:
 
-- **ackmud.com** -> ack-web (10.1.0.247:5000) via ACK network
-- **bailes.us** -> personal-web.bailes.us:3000 (CT 106) via LAN
-- **rakuensoftware.com** -> rakuen-web.bailes.us:3000 (CT 107) via LAN
+- **ackmud.com** -> `ack-web` (:5000) via the ACK network
+- **bailes.us** -> `personal-web` (:3000) via the LAN
+- **rakuensoftware.com** -> `rakuen-web` (:3000) via the LAN
 - **rakuensoft.com** -> 301 redirect to rakuensoftware.com
 
-Also proxies legacy MUD WebSocket traffic (ports 18890, 8891, 8892) to ack-web
+Also proxies legacy MUD WebSocket traffic (ports 18890, 8891, 8892) to `ack-web`
 via TCP stream blocks.
 
-- **eth0**: on vmbr0 (LAN, incoming HTTPS from router)
-- **eth1**: on vmbr2 (ACK, reach ack-web)
+- **eth0**: vmbr0 (LAN, incoming HTTPS from router)
+- **eth1**: vmbr2 (ACK, reaches `ack-web`)
 
 Backend servers run only their app server (node or service runtime) with no
 nginx or TLS of their own. All certificate management is centralized here.
 
-LAN backends are addressed by DNS name, resolved through the dns container
-(CT 101). Two things follow, and both matter:
+Backends are addressed by DNS name, resolved through the `dns` container. Two
+things follow, and both matter:
 
 - Renumbering a backend is a DNS change, not an edit to this proxy.
 - The vhosts go through a `resolver` and a variable rather than naming the
   backend directly in `proxy_pass`. A literal name is resolved while nginx
   parses its config, so a resolver that is not answering yet -- as on a cold
-  boot, where this container and the dns container start together -- is a fatal
-  config error. nginx then stays down and takes *every* site on this proxy with
-  it. A `Restart=on-failure` drop-in covers the same class of startup failure.
-  Both exist because that outage happened.
-
-ack-web keeps a literal address: it lives on the ACK bridge, which the bailes.us
-zone does not cover.
+  boot, where this container and the `dns` container start together -- is a
+  fatal config error. nginx then stays down and takes *every* site on this
+  proxy with it. A `Restart=on-failure` drop-in covers the same class of
+  startup failure. Both exist because that outage happened.
 
 ---
 
-## 07 - Personal Web (CTID 106)
+## 07 - Personal Web (`personal-web`)
 
 Single-homed LXC on the home LAN running a static file server (node serve) on
 port 3000 for bailes.us.
 
-- **eth0**: on vmbr0, resolvable as `personal-web.bailes.us`
-- TLS termination handled by nginx-proxy (CT 105)
+- **eth0**: vmbr0
+- TLS termination handled by `nginx-proxy`
 - Firewall: :3000 from LAN (nginx-proxy connects here), SSH from LAN
 - Created with `--onboot 1`, or the site does not come back after a host reboot.
 
 ---
 
-## 13 - Rakuen Web (CTID 107)
+## 13 - Rakuen Web (`rakuen-web`)
 
 Single-homed LXC on the home LAN running a static file server (node serve) on
 port 3000 for rakuensoftware.com.
 
-- **eth0**: on vmbr0, resolvable as `rakuen-web.bailes.us`
-- TLS termination handled by nginx-proxy (CT 105)
+- **eth0**: vmbr0
+- TLS termination handled by `nginx-proxy`
 - Firewall: :3000 from LAN (nginx-proxy connects here), SSH from LAN
 - Created with `--onboot 1`, or the site does not come back after a host reboot.
 - Sized 1024MB / 2 cores / 8GB: the site is a Vite + React SPA built
@@ -263,7 +289,7 @@ public (or the container given credentials) before this script can clone it.
 
 ---
 
-## 08 - Dashboards (deployed to obs, CTID 100)
+## 08 - Dashboards (deployed to `obs`)
 
 Installs blackbox_exporter on obs and provisions Grafana dashboards:
 
@@ -276,7 +302,7 @@ services without native `/metrics` endpoints.
 
 ---
 
-## 09 - Proxmox Host Observability (runs on the Proxmox host, 192.168.1.253)
+## 09 - Proxmox Host Observability (runs on the Proxmox host)
 
 Installs observability agents directly on the Proxmox host (not in a container).
 Unlike the other homelab scripts, this does NOT use `pct push`/`pct exec` since
@@ -287,14 +313,14 @@ it runs on the bare-metal host itself.
   API token (`prometheus@pve!metrics`). Exports CPU, memory, disk, and network
   metrics for all containers, VMs, and the host node.
 - **Promtail**: ships Proxmox syslog, pveproxy access logs, and journal to Loki
-  at 192.168.1.100:3100 (tenant: `proxmox`).
-- **Firewall**: opens port 9221 from obs (192.168.1.100) so Prometheus can scrape.
+  on `obs` (tenant: `proxmox`).
+- **Firewall**: opens port 9221 to `obs` so Prometheus can scrape.
 
 Prereq: obs (03-setup-obs.sh) must be running.
 
 ---
 
-## 10 - Wolf Cloud Gaming (CTID configurable, default 120)
+## 10 - Wolf Cloud Gaming (`wolf`, CTID configurable)
 
 Privileged LXC container running Wolf (Games on Whales) for Moonlight-compatible
 cloud gaming, plus Wolf Den for web-based management.
@@ -307,7 +333,7 @@ cloud gaming, plus Wolf Den for web-based management.
 ### Usage
 
 ```bash
-./10-setup-wolf.sh                           # Defaults: CTID 120, 4 CPU, 4 GB RAM, 16 GB disk
+./10-setup-wolf.sh                           # Defaults: 4 CPU, 4 GB RAM, 16 GB disk
 ./10-setup-wolf.sh --ctid 125 --cpu 8        # Custom CTID and CPU
 ./10-setup-wolf.sh --storage fast --disk 32  # Custom storage and disk
 ```
@@ -340,22 +366,23 @@ Select GPU for Wolf [1]:
 
 ### Moonlight pairing
 
-1. Open Moonlight client, add server IP
+1. Open Moonlight client, add the `wolf` host
 2. Check Wolf logs for PIN: `pct exec <ctid> -- docker logs wolf-wolf-1`
-3. Enter PIN at `http://<IP>:47989/pin/#<PIN>`
+3. Enter the PIN at the Wolf pairing endpoint on :47989
 
 ---
 
-## 11 - LLM Inference (CTID 103, 192.168.1.103, hostname `qwen103`)
+## 11 - LLM Inference (`qwen103`; running as CT 140 `tierA-5080`)
 
 Privileged LXC container running llama.cpp (Vulkan) for local LLM inference
 with AMD GPU acceleration (7900XTX via `/dev/dri` passthrough — Vulkan-only,
 no ROCm/kfd).
 
-> The script's filename is still `11-setup-ollama.sh` for git history, but
-> all defaults now target the current CT 103 / Qwen3.6-27B setup. The model
-> itself is not auto-downloaded by default; either provide `--model <url>`
-> or place the GGUF at `--model-path` before running.
+> The script's filename is still `11-setup-ollama.sh` for git history. The
+> running inference host is now CT 140 `tierA-5080`, which this script did not
+> provision; treat the details below as describing the script, not the live
+> host. The model is not auto-downloaded by default; either provide
+> `--model <url>` or place the GGUF at `--model-path` before running.
 
 ### Prerequisites
 
@@ -366,12 +393,12 @@ no ROCm/kfd).
 ### Usage
 
 ```bash
-./11-setup-ollama.sh                     # Defaults: CTID 103, qwen103, Qwen3.6-27B at 128k
-./11-setup-ollama.sh --deploy-only       # Re-deploy config to existing CT 103
+./11-setup-ollama.sh                     # Defaults: hostname qwen103, Qwen3.6-27B at 128k
+./11-setup-ollama.sh --deploy-only       # Re-deploy config to the existing container
 ./11-setup-ollama.sh --ctid 124 --hostname qwen124 --model-path /opt/models/other.gguf
 ```
 
-### Current production model
+### Reference model configuration
 
 Qwen3.6-27B Q4_K_M (~17 GB on disk, ~16 GiB VRAM), served at 128k context
 window. Native `ctx_train` is 262144, so 128k is within spec — no YaRN or
@@ -403,17 +430,17 @@ then `systemctl daemon-reload && systemctl restart llama-qwen103`.
 
 ### Firewall
 
-Port 8080 is restricted to `192.168.0.0/23` (home LAN) and localhost via
+Port 8080 is restricted to the home LAN (192.168.0.0/23) and localhost via
 iptables rules inside the container.
 
 ### Quick start
 
 ```bash
-# Test API
-curl http://192.168.1.103:8080/v1/models
+# Test API (resolve the host's address with: pct list)
+curl http://<llm-host>:8080/v1/models
 
 # Chat (OpenAI-compatible)
-curl http://192.168.1.103:8080/v1/chat/completions \
+curl http://<llm-host>:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "Qwen3.6-27B-Q4_K_M.gguf", "messages": [{"role": "user", "content": "hello"}]}'
 ```
@@ -430,18 +457,20 @@ aimee agent test qwen103        # connectivity check
 
 ---
 
-## 12 - Media Stack (CTID 119, 192.168.1.119)
+## 12 - Media Stack (`media-stack`)
+
+> Not currently deployed. No `media-stack` container exists on the host.
 
 Privileged LXC container running the media automation stack via Docker Compose.
-All services route through the VPN gateway (192.168.1.104).
+All services route through the VPN gateway.
 
-- **eth0**: 192.168.1.121/23 on vmbr0 (LAN, gateway = VPN gateway)
+- **eth0**: vmbr0 (LAN, gateway = VPN gateway)
 
 ### Prerequisites
 
-- VPN gateway (VMID 104, 192.168.1.104) must be running
-- BitTorrent LXC (CT 116, 192.168.1.116) must be running
-- NAS NFS export `192.168.1.254:/mnt/data/storage` must be accessible
+- The VPN gateway VM must be running
+- The `bittorrent` container must be running
+- The NAS storage NFS export must be accessible
 
 ### Services
 
@@ -453,13 +482,13 @@ All services route through the VPN gateway (192.168.1.104).
 | Lidarr | 8686 | Music automation |
 | Readarr | 8787 | Books/audiobooks automation |
 
-All services connect to qBittorrent at 192.168.1.116:8080 with per-app
-download categories (sonarr, radarr, lidarr, readarr).
+All services connect to qBittorrent on the `bittorrent` container (:8080) with
+per-app download categories (sonarr, radarr, lidarr, readarr).
 
 ### Storage
 
-Single NFS mount at `/mnt/storage` (maps to `192.168.1.254:/mnt/data/storage`)
-enables hardlinks between downloads and media libraries:
+Single NFS mount at `/mnt/storage` (maps to the NAS storage export) enables
+hardlinks between downloads and media libraries:
 
 | Path | Purpose |
 |------|---------|
@@ -477,6 +506,171 @@ Config databases are backed up daily at 03:00 to
 ### Usage
 
 ```bash
-./12-setup-media-stack.sh               # Create CT and configure
+./12-setup-media-stack.sh                # Create CT and configure
 ./12-setup-media-stack.sh --deploy-only  # Re-run configuration on existing CT
+```
+
+---
+
+## 14 - VPN Gateway Health (`vpn-gateway`)
+
+Installs a self-healing health check onto the VPN gateway. Separate from
+step 01 because the live gateway is a SmoothRouter appliance that runs
+OpenVPN under `routerd-vpn.service` -- step 01 builds a plain Debian
+OpenVPN VM and would clobber it, so this only adds files under
+`/usr/local/bin` and `/etc/systemd/system`.
+
+### What it fixes
+
+OpenVPN can come up with a broken `ovpn-dco` data channel. Because the
+config sets `persist-tun`, `tun0` and its routes stay in place while no
+data flows, so the tunnel looks healthy and nothing recovers it. One such
+outage ran unnoticed from 2026-08-07 to 2026-08-11.
+
+Liveness is therefore judged by **authenticated bytes advancing** in
+OpenVPN's status file -- the one counter that stayed pinned at zero for
+the whole outage. Two probes that look reasonable and are not:
+
+- pinging the provider's DNS: publicly routable, so it answers via the
+  home router with the tunnel down
+- `ping -I tun0`: fails even on a healthy DCO device
+
+It also re-applies NAT and the FORWARD kill switch on every run. There is
+no `iptables-persistent` on the gateway, so a boot timer is what makes
+those rules durable.
+
+### Backoff
+
+Restarts are rate-limited to one per 10 minutes, and it will not retry
+after `AUTH_FAILED`: the provider rate-limits reconnects, and a restart
+loop is worse than a down tunnel because the kill switch already means a
+down tunnel leaks nothing.
+
+```bash
+./14-setup-vpn-gateway-health.sh            # install and enable
+./14-setup-vpn-gateway-health.sh --status   # report state, change nothing
+```
+
+Log: `/var/log/vpn-gateway-health.log` on the gateway.
+
+---
+
+## 15 - DNS (`dns`)
+
+Syncs the local DNS zone on CT `dns` (Technitium) and points LAN guests
+at it. This is what makes hostnames work, and therefore what lets every
+other script stop writing addresses down.
+
+**Records are derived, not listed.** The script reads the live guest list
+from Proxmox and syncs the zone to match, so renumbering a container is
+corrected by the next run and nothing else needs editing. Guests with no
+static address are skipped rather than guessed at -- DHCP leases and OCI
+containers on host networking would only drift.
+
+Anything outside the local zone is forwarded to the home router.
+
+Three hosts are deliberately not repointed:
+
+| Host | Why |
+|------|-----|
+| `bittorrent` | DNS must stay on the VPN gateway; its firewall DROPs port 53 to anything else, which is the DNS-leak guard. The gateway forwards the local zone on to `dns`, so it still resolves hostnames. |
+| `ack-gateway` | Runs dnsmasq as the ACK network's resolver; its own resolver feeds that. |
+| `dns` | The resolver itself. |
+
+The router stays as a secondary nameserver everywhere, so external names
+still resolve if CT `dns` is down. Internal names will not -- that is the
+accepted trade.
+
+```bash
+./15-setup-dns.sh              # sync records, forwarders, and clients
+./15-setup-dns.sh --dry-run    # preview, change nothing
+./15-setup-dns.sh --show       # list current records
+```
+
+---
+
+## Known gaps
+
+Two things that are live but not reproducible from this repo.
+
+### `07-setup-selfheal.sh` is not in the repo
+
+The ACK containers each carry `/root/07-setup-selfheal.sh`, which drops a
+systemd override into `/etc/systemd/system/<unit>.service.d/selfheal.conf`
+setting `Restart=always` and `StartLimitIntervalSec=0`. That script was applied
+by hand and has no copy here, so this repo cannot rebuild those hosts exactly.
+
+It also had a real bug, fixed live on 2026-08-11. On `ack-db` the override was
+attached to `postgresql.service`, which is `Type=oneshot`; systemd refuses
+`Restart=` on oneshot units, so the unit failed to load with `bad-setting` and
+the cluster never started at boot. PostgreSQL had been down since 2026-08-05,
+with `tngdb` logging "Database not ready" the whole time and `acktng` stuck
+activating. The override now lives on `postgresql@.service`, which is the unit
+that actually runs a cluster.
+
+If that script is ever brought into the repo, it must skip `Type=oneshot`
+units rather than assuming every service takes `Restart=`.
+
+### qBittorrent settings are not provisioned
+
+Connection limits, the protocol setting and the rate limits are whatever is in
+the container's `qBittorrent.conf`. `02-setup-bittorrent.sh` writes that file
+only when it creates the container, so later changes made through the Web UI
+or the API are not captured here.
+---
+
+## 16 - Test Host Reaper (`pvetest`)
+
+The odd one out: it configures a **different Proxmox host** and creates no
+container. Run it on `pvetest` itself, as root.
+
+`pvetest` is a second Proxmox host, not a guest of this one, so there is no
+`pct list` entry to resolve it from -- it sits alongside the router and the NAS
+as one of the few things named by address rather than looked up. The script
+identifies it by hostname and refuses to install anywhere else (see Safety).
+
+`pvetest` is disposable infrastructure where agents build throwaway VMs and
+containers. Without a reaper those accumulate, and the next user inherits
+someone else's half-configured box. The script installs an hourly sweep that
+destroys abandoned environments, plus the host policy agents read.
+
+### Two clocks
+
+A VM or container is destroyed when **either** clock runs out:
+
+| Clock | Runs out after | Reset by |
+|-------|----------------|----------|
+| Liveness | 4h with no measurable activity | the guest actually doing work |
+| Lease | 4h since creation or last renewal | `aimee-keepalive` |
+
+"Measurable activity" is at least 10 MiB of combined disk read + disk write +
+net in + net out between two consecutive hourly samples; a stopped guest is
+never active. This is why a lease is not immortality: renewing satisfies the
+lease clock only, so a leased but idle environment is still reclaimed. Scratch
+under `/tmp`, `/var/tmp`, `/opt`, `/srv` and `/root` is swept on the same clock
+using mtime. Templates under `/var/lib/vz/template/` are never touched, since
+agents need them to build fresh environments.
+
+### Commands installed
+
+```bash
+aimee-keepalive vm:101          # renew a lease: full 4h from now, uncapped
+aimee-keepalive ct:200
+aimee-keepalive /tmp/my-build
+aimee-reap-status               # everything reapable, time left on both clocks
+```
+
+### Safety
+
+The script refuses to install on any host not named `pvetest` unless run with
+`FORCE=1`, because it installs a sweep that destroys every VM and CT it finds.
+Permanent fixtures go in `REAP_PROTECTED_VMIDS` in `/etc/aimee-reaper.conf`.
+Every action and renewal is logged to `/var/log/aimee-reaper.log`, and
+`aimee-reaper --dry-run` reports what a sweep would destroy without touching
+anything.
+
+### Usage
+
+```bash
+./16-setup-test-host-reaper.sh   # run on pvetest as root; idempotent
 ```

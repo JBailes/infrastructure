@@ -9,17 +9,18 @@
 #   ./00-setup-apt-cache.sh --deploy-only  # Re-run configuration on existing CT
 #   ./00-setup-apt-cache.sh --configure    # (internal) Run inside the container
 #
-# Creates a tri-homed Debian 13 LXC (CT 115):
-#   eth0 = 192.168.1.115/23 on vmbr0 (LAN, for fetching packages)
-#   eth1 = 10.0.0.115/20 on vmbr1 (WOL private network, serves cached packages)
-#   eth2 = 10.1.0.115/24 on vmbr2 (ACK private network, serves cached packages)
+# Creates a dual-homed Debian 13 LXC named `apt-cache`:
+#   eth0 on vmbr0 (LAN, for fetching packages)
+#   eth1 on vmbr2 (ACK private network, serves cached packages)
 #
-# Provides an apt package cache for all homelab, WOL, and ACK hosts.
+# The vmbr1 (WOL) interface was removed with the WOL decommission.
+#
+# Provides an apt package cache for homelab and ACK hosts.
 # apt-cacher-ng caches .deb packages on first download and serves them
 # from cache on subsequent requests.
 #
 # After this script: all other hosts should configure apt to use
-# http://10.0.0.115:3142 as their proxy.
+# http://apt-cache:3142 as their proxy.
 
 set -euo pipefail
 
@@ -35,24 +36,20 @@ configure() {
 
     rm -f /root/.env.bootstrap
 
-    INTERNAL_IP="10.0.0.115"
-    EXTERNAL_IP="192.168.1.115"
+    EXTERNAL_IP="${LAN_ADDR:?LAN_ADDR not set (passed in by host_main)}"
     ACK_IP="10.1.0.115"
-    PRIVATE_NET="10.0.0.0/20"
     ACK_NET="10.1.0.0/24"
     LAN_NET="192.168.0.0/23"
     CACHE_PORT="3142"
 
     [[ $EUID -eq 0 ]] || err "Run as root"
 
-    # -- Network (tri-homed: external DNS for fetching, internal for hostnames)
+    # -- Network (dual-homed: external DNS for fetching, internal for hostnames)
     configure_network() {
         info "Configuring DNS and NTP"
         cat > /etc/resolv.conf <<EOF
 nameserver 1.1.1.1
 nameserver 8.8.8.8
-nameserver 10.0.0.200
-nameserver 10.0.0.201
 EOF
 
         if command -v chronyc &>/dev/null; then
@@ -125,15 +122,12 @@ ACNG
         iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
         # SSH from private network
-        iptables -A INPUT -s "$PRIVATE_NET" -p tcp --dport 22 -j ACCEPT
 
         # apt-cacher-ng from private network, ACK network, and LAN
-        iptables -A INPUT -s "$PRIVATE_NET" -p tcp --dport "$CACHE_PORT" -j ACCEPT
         iptables -A INPUT -s "$ACK_NET" -p tcp --dport "$CACHE_PORT" -j ACCEPT
         iptables -A INPUT -s "$LAN_NET" -p tcp --dport "$CACHE_PORT" -j ACCEPT
 
         # Health check from private network and ACK network
-        iptables -A INPUT -s "$PRIVATE_NET" -p tcp --dport 8080 -j ACCEPT
         iptables -A INPUT -s "$ACK_NET" -p tcp --dport 8080 -j ACCEPT
 
         info "iptables firewall configured"
@@ -175,7 +169,6 @@ SERVICE
     }
 
     # -- Run in-container setup
-    info "Setting up apt-cache package cache (${INTERNAL_IP})"
 
     configure_network
     install_packages
@@ -186,13 +179,11 @@ SERVICE
     cat <<EOF
 
 ================================================================
-apt-cache setup complete (${INTERNAL_IP}:${CACHE_PORT}).
 
 apt-cacher-ng caches .deb packages for all internal hosts.
 Other HTTP/HTTPS traffic goes directly through gateway NAT.
 
 Networks served:
-  WOL:  ${INTERNAL_IP}:${CACHE_PORT} (vmbr1)
   ACK:  ${ACK_IP}:${CACHE_PORT} (vmbr2)
   LAN:  ${EXTERNAL_IP}:${CACHE_PORT} (vmbr0)
 
@@ -210,7 +201,7 @@ host_main() {
     source "$SCRIPT_DIR/lib/common.sh"
     [[ $EUID -eq 0 ]] || err "Run as root"
 
-    local ctid=115
+    local ctid="${APT_CACHE_CTID:-103}"
     local hostname="apt-cache"
     local ip="192.168.1.${ctid}"
     local deploy_only=0
@@ -218,11 +209,9 @@ host_main() {
 
     if [[ $deploy_only -eq 0 ]]; then
         if create_lxc "$ctid" "$hostname" "$ip" 512 1 32 "$ROUTER_GW" "no"; then
-            # Add WOL private network (tri-homed)
-            pct set "$ctid" --net1 "name=eth1,bridge=${PRIVATE_BRIDGE},ip=10.0.0.115/20"
-            # Add ACK private network
-            pct set "$ctid" --net2 "name=eth2,bridge=${ACK_BRIDGE},ip=10.1.0.115/24"
-            info "Tri-homing configured: net1 on ${PRIVATE_BRIDGE} (10.0.0.115/20), net2 on ${ACK_BRIDGE} (10.1.0.115/24)"
+            # Add ACK private network (dual-homed)
+            pct set "$ctid" --net1 "name=eth1,bridge=${ACK_BRIDGE},ip=10.1.0.115/24"
+            info "Dual-homed: net1 on ${ACK_BRIDGE} (10.1.0.115/24)"
 
             pct start "$ctid"
             info "CREATED: CT $ctid ($hostname) at $ip"
@@ -235,7 +224,7 @@ host_main() {
     fi
 
     info "Deploying $hostname configuration (CT $ctid)"
-    deploy_script "$ctid" "$SCRIPT_DIR/00-setup-apt-cache.sh"
+    deploy_script "$ctid" "$SCRIPT_DIR/00-setup-apt-cache.sh" "LAN_ADDR=${ip}"
 }
 
 # ===================================================================

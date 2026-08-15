@@ -1,5 +1,16 @@
 # Apt Package Cache
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+>
+> The WOL network described here has since been decommissioned.
+
+
 ## Problem
 
 Every container and VM downloads the same Debian packages from the public internet during bootstrap. With 19 hosts, this means redundant downloads through the gateway NAT, slowing deploys and wasting bandwidth.
@@ -16,7 +27,7 @@ A dedicated `apt-cache` LXC container running apt-cacher-ng, tri-homed so it can
 | CTID | 115 (static) |
 | Type | LXC (unprivileged) |
 | Private IP | 10.0.0.32 |
-| External IP | 192.168.1.115 |
+| External IP | CT 140 `tierA-5080` `apt-cache` |
 | Bridge (WOL) | vmbr1 (untagged, shared) |
 | Bridge (ACK) | vmbr2 (10.1.0.32/24) |
 | Bridge (LAN) | vmbr0 |

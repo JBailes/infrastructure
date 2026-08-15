@@ -1,5 +1,14 @@
 # Ollama LXC Container
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+
+
 ## Problem
 
 There is no local LLM inference server in the homelab. Running Ollama on a
@@ -18,7 +27,7 @@ pattern (same dual-mode structure as `10-setup-wolf.sh`).
 |----------|-------|
 | Hostname | ollama |
 | CTID | 103 |
-| IP | 192.168.1.103 |
+| Host | CT 140 `tierA-5080` |
 | Network | vmbr0 (LAN only) |
 | RAM | 64 GB (65536 MB) |
 | Disk | 256 GB on `large` storage |
@@ -75,11 +84,11 @@ aimee
 ## Test plan
 
 1. Run `./11-setup-ollama.sh` on Proxmox host
-2. Verify CT 103 exists with correct resources: `pct config 103`
+2. Verify CT 140 `tierA-5080` exists with correct resources: `pct config 103`
 3. Verify GPU access: `pct exec 103 -- ls /dev/dri /dev/kfd`
-4. Verify Ollama is running: `curl http://192.168.1.103:11434/api/version`
+4. Verify Ollama is running: `curl http://CT 140 `tierA-5080`:11434/api/version`
 5. Pull a test model: `pct exec 103 -- ollama pull qwen3:1.7b`
-6. Run inference: `curl http://192.168.1.103:11434/v1/chat/completions -d '...'`
+6. Run inference: `curl http://CT 140 `tierA-5080`:11434/v1/chat/completions -d '...'`
 
 ## Rollback plan
 

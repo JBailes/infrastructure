@@ -1,5 +1,16 @@
 # Grafana Health and Utilization Dashboards
 
+> **Historical proposal.** This document records a design as it was proposed and
+> implemented at the time. Host identities in the prose have been updated to the
+> CTIDs and hostnames currently in use, so the containers named here can still be
+> located. Code blocks are left verbatim and still contain the literal addresses
+> and CTIDs used at the time -- do not copy them without checking. Some of what is
+> described has since changed or been removed; see
+> [architecture.md](../../../architecture.md) for what actually runs today.
+>
+> The WOL network described here has since been decommissioned.
+
+
 ## Problem
 
 There are no Grafana dashboards. Operators have no visibility into which services are healthy or how much CPU/memory each host is consuming without SSH-ing into individual containers.
@@ -30,7 +41,7 @@ A single-stat grid showing each service as a green (up) or red (down) tile.
 | wol-world-test | `wol` | 10.0.0.216:8443 |
 | wol-ai-test | `wol` | 10.0.0.217:8443 |
 | wol-realm-test | `wol` | 10.0.0.215:8443 |
-| ack-web | `ack` | 10.1.0.247:5000 |
+| ack-web | `ack` | CT 247 `ack-web`:5000 |
 | Prometheus | `obs-self` | localhost:9090 |
 | Alertmanager | `obs-self` | localhost:9093 |
 | Loki | `obs-loki` | localhost:3100 |
@@ -39,8 +50,8 @@ A single-stat grid showing each service as a green (up) or red (down) tile.
 
 | Service | URL to probe | Notes |
 |---------|-------------|-------|
-| personal-web | http://192.168.1.117:3000/ | No /health, probe / for 200 |
-| nginx-proxy | http://192.168.1.118:80/ | Probe for any HTTP response |
+| personal-web | http://CT 106 `personal-web`:3000/ | No /health, probe / for 200 |
+| nginx-proxy | http://CT 105 `nginx-proxy`:80/ | Probe for any HTTP response |
 
 **Approach:** Install blackbox_exporter on obs. Add a `blackbox` scrape job to Prometheus that probes the two HTTP endpoints. Dashboard queries `up` for scraped services and `probe_success` for blackbox targets.
 
