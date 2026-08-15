@@ -27,6 +27,30 @@ Hosts are referred to by **CTID and hostname** (for example CT 108 `bittorrent`)
 
 CT 110 is a stopped OCI template, not a running service.
 
+## Test Host (`pvetest`)
+
+`pvetest` is a **second Proxmox host**, not a guest of this one. Agents build
+throwaway VMs and containers on it. It holds no persistent workload — everything
+on it is test data. Because it is not a guest here, there is no `pct list` entry
+to resolve it from; like the router and the NAS, it is named by address
+(192.168.1.252) rather than looked up.
+
+Because it is shared and disposable, `pvetest` runs a **test-environment reaper**
+(`bootstrap/16-setup-test-host-reaper.sh`). An hourly sweep destroys abandoned
+VMs, containers, and scratch directories so the next user always builds on a
+clean host rather than inheriting someone else's half-configured box.
+
+A guest is destroyed when **either** clock runs out: no measurable activity for
+4h (it is not doing work), or 4h since creation or last renewal (nobody claims
+it). A long-running test survives on its own activity; a leased but stalled
+environment is still reclaimed. Anyone running a long test renews with
+`aimee-keepalive`, which slides the lease a full 4h from the moment of renewal,
+uncapped. `aimee-reap-status` shows time left on both clocks.
+
+The rules agents follow live on the host itself at `/root/AGENTS.md`, installed
+by the same script. Never adopt an environment already running on pvetest — it
+may be destroyed underneath you mid-test.
+
 ## Network
 
 All homelab services are on the home LAN (`vmbr0`, 192.168.0.0/23). Four hosts are dual-homed onto the ACK network (`vmbr2`, 10.1.0.0/24):
