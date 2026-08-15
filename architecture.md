@@ -61,6 +61,7 @@ graph TB
     NGINX -->|"proxy"| ACKWEB
     NGINX -->|"proxy"| PWEB
     NGINX -->|"proxy"| RWEB
+    NGINX -.->|"resolves backends"| DNS
     PLAYERS -->|":8890-8894"| ACKGW
     ACKGW -->|"DNAT"| MUDS
     MUDS -->|"PostgreSQL"| ACKDB
@@ -221,6 +222,8 @@ Decommissioned. See the WOL section above.
 Environments are bootstrapped independently but share one dependency: **apt-cache must exist first** for fast package installs.
 
 1. **Homelab** (`homelab/bootstrap/`) -- apt-cache, VPN gateway, bittorrent, obs, nginx-proxy, personal-web, deploy, rakuen-web. Numbered step prefixes in that directory define the order.
+
+   nginx-proxy is the exception to running these in order: its vhosts name their backends, so it needs the dns container serving the `bailes.us` zone with records for personal-web and rakuen-web already in place. It checks this and refuses to configure rather than writing a config that will not parse.
 2. **ACK** (`homelab/ack/bootstrap/pve-setup-ack.sh`) -- creates bridge, containers, and bootstraps gateway + ack-db + MUD servers + ack-web + tng-ai + tngdb.
 
 Bootstrap scripts resolve hosts by CTID and hostname via `resolve_ctid` in `homelab/bootstrap/lib/common.sh`; they still carry literal addresses where the provisioning step must assign one.

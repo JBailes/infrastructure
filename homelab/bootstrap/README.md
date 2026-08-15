@@ -244,8 +244,17 @@ via TCP stream blocks.
 Backend servers run only their app server (node or service runtime) with no
 nginx or TLS of their own. All certificate management is centralized here.
 
-> The script still provisions a `vmbr1` interface for WOL reachability. That
-> network is decommissioned.
+Backends are addressed by DNS name, resolved through the `dns` container. Two
+things follow, and both matter:
+
+- Renumbering a backend is a DNS change, not an edit to this proxy.
+- The vhosts go through a `resolver` and a variable rather than naming the
+  backend directly in `proxy_pass`. A literal name is resolved while nginx
+  parses its config, so a resolver that is not answering yet -- as on a cold
+  boot, where this container and the `dns` container start together -- is a
+  fatal config error. nginx then stays down and takes *every* site on this
+  proxy with it. A `Restart=on-failure` drop-in covers the same class of
+  startup failure. Both exist because that outage happened.
 
 ---
 
@@ -257,6 +266,7 @@ port 3000 for bailes.us.
 - **eth0**: vmbr0
 - TLS termination handled by `nginx-proxy`
 - Firewall: :3000 from LAN (nginx-proxy connects here), SSH from LAN
+- Created with `--onboot 1`, or the site does not come back after a host reboot.
 
 ---
 
@@ -268,8 +278,9 @@ port 3000 for rakuensoftware.com.
 - **eth0**: vmbr0
 - TLS termination handled by `nginx-proxy`
 - Firewall: :3000 from LAN (nginx-proxy connects here), SSH from LAN
+- Created with `--onboot 1`, or the site does not come back after a host reboot.
 - Sized 1024MB / 2 cores / 8GB: the site is a Vite + React SPA built
-  in-container, which OOMs at personal-web's 256MB.
+  in-container, which OOMs below 1GB.
 - Serves with `serve -s`, which rewrites unknown paths to index.html. The site
   is a single-page app, so without that flag /blog 404s on a hard refresh.
 
